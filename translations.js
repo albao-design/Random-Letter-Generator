@@ -180,13 +180,23 @@ function fitTitle() {
     }
     // Still too long on a very narrow phone: let it wrap instead
     if (h1.scrollWidth > h1.clientWidth) h1.classList.add('wrap');
-       // The description wraps so its lines end where the title ends
-       const desc = document.querySelector('header p');
-       if (desc) {
-           desc.style.maxWidth = h1.classList.contains('wrap')
-               ? ''
-               : Math.ceil(h1.getBoundingClientRect().width) + 'px';
-       }
+
+    // The description wraps so its lines end where the title's text ends
+    const desc = document.querySelector('header p');
+    if (desc) {
+        const range = document.createRange();
+        range.selectNodeContents(h1);
+        const titleTextWidth = range.getBoundingClientRect().width;
+        desc.style.maxWidth = h1.classList.contains('wrap') ? '' : Math.ceil(titleTextWidth) + 'px';
+
+        // Line the language toggle up with the middle of the description's last line
+        const toggle = document.querySelector('.header-top .lang-toggle');
+        if (toggle) {
+            const lineHeight = parseFloat(getComputedStyle(desc).lineHeight) || 20;
+            const nudge = (lineHeight - toggle.offsetHeight) / 2;
+            toggle.style.setProperty('--toggle-nudge', nudge + 'px');
+        }
+    }
 }
 
 window.addEventListener('resize', fitTitle);

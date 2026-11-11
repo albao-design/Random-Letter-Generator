@@ -41,13 +41,27 @@ header {
     padding-bottom: 24px;
 }
 
-/* Title and language toggle share one line */
+/* Title and description on the left; language toggle on the right,
+   lined up with the last line of the description */
 .header-top {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
     gap: 12px;
+}
+
+.header-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.header-text h1 {
     margin-bottom: 8px;
+}
+
+/* Centre the toggle on the description's last line (toggle is taller than a line of text) */
+.header-top .lang-toggle {
+    margin-bottom: var(--toggle-nudge, 0px);
 }
 
 header h1 {
