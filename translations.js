@@ -163,15 +163,16 @@ function applyTranslations() {
     document.dispatchEvent(new Event('languagechange-app'));
 }
 
-// Keep the title on one line beside the language toggle: shrink it a little if needed
-const TITLE_MAX_PX = 20;
+// Keep the title on one line beside the language toggle: shrink it a little if needed.
+// Starts from the stylesheet size (20px on desktop, 18px / 16px on phones).
 const TITLE_MIN_PX = 15;
 
 function fitTitle() {
     const h1 = document.querySelector('header h1');
     if (!h1) return;
     h1.classList.remove('wrap');
-    let size = TITLE_MAX_PX;
+    h1.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(h1).fontSize) || 20;
     h1.style.fontSize = size + 'px';
     while (h1.scrollWidth > h1.clientWidth && size > TITLE_MIN_PX) {
         size -= 0.5;
