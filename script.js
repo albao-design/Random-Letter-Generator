@@ -194,7 +194,9 @@ function typewriterVisibleCount(t, total) {
 function drawScene(g, opts) {
     const { time, animate, type, transparent } = opts;
 
-    if (transparent) g.clear(); else g.background(paperColor());
+    if (transparent) g.clear();
+    else if (opts.background) g.background(...opts.background);
+    else g.background(paperColor());
 
     let letters = generatedLetters;
     if (animate && type === 'shuffle' && shuffleVersions.length) {
@@ -528,6 +530,7 @@ const nextTick = () => new Promise(r => setTimeout(r, 0));
 const VIDEO_SIZE = 1080;
 const VIDEO_FPS = 30;
 const VIDEO_TARGET_MS = 8000;
+const CHROMA_GREEN = [0, 255, 0]; // green-screen background used when "Transparent" is ticked
 const H264_CODECS = ['avc1.640028', 'avc1.4d0028', 'avc1.420028']; // High, Main, Baseline
 
 let preparedVideo = null; // finished video waiting for the user to tap "Save MP4" (phones)
@@ -635,6 +638,7 @@ async function exportMP4() {
 
     const type = animationState.type;
     const timeline = videoTimeline(type);
+    const greenScreen = transparentBackground; // MP4 can't be see-through, so use a green screen
     const g = createGraphics(VIDEO_SIZE, VIDEO_SIZE);
     g.pixelDensity(1);
 
@@ -666,6 +670,7 @@ async function exportMP4() {
                 animate: true,
                 type,
                 transparent: false,
+                background: greenScreen ? CHROMA_GREEN : null,
                 fill: true
             });
             const frame = new VideoFrame(g.elt, {
@@ -689,17 +694,19 @@ async function exportMP4() {
         muxer.finalize();
 
         const seconds = (timeline.frames / VIDEO_FPS).toFixed(1);
-        const file = new File([muxer.target.buffer], fileName('mp4'), { type: 'video/mp4' });
+        const name = greenScreen ? fileName('mp4').replace(/\.mp4$/, '-greenscreen.mp4') : fileName('mp4');
+        const file = new File([muxer.target.buffer], name, { type: 'video/mp4' });
+        const tip = greenScreen ? ' Use Chroma Key in your editing app to remove the green.' : '';
 
         if (shouldUseShareSheet(file)) {
             // Phones need a fresh tap to open the share sheet
             preparedVideo = file;
             btn.textContent = 'Save MP4';
             btn.classList.add('ready');
-            setExportStatus(`Video ready (${seconds}s). Tap Save MP4 to save or share it.`);
+            setExportStatus(`Video ready (${seconds}s). Tap Save MP4 to save or share it.${tip}`);
         } else {
             downloadBlob(file, file.name);
-            setExportStatus(`MP4 saved (${seconds}s, ${VIDEO_SIZE} × ${VIDEO_SIZE})`);
+            setExportStatus(`MP4 saved (${seconds}s, ${VIDEO_SIZE} × ${VIDEO_SIZE}).${tip}`);
         }
     } catch (err) {
         console.error(err);
