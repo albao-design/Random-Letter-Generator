@@ -483,66 +483,28 @@ function fileName(ext) {
     return `random-letters${slug ? '-' + slug : ''}.${ext}`;
 }
 
-// Find the area that actually has letters in it, so exports are cropped neatly
-function contentBounds(imageData, bounds) {
-    const { data, width: w, height: h } = imageData;
-    let { minX, minY, maxX, maxY } = bounds;
-    for (let y = 0; y < h; y++) {
-        const row = y * w * 4;
-        for (let x = 0; x < w; x++) {
-            if (data[row + x * 4 + 3] > 8) {
-                if (x < minX) minX = x;
-                if (x > maxX) maxX = x;
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
-            }
-        }
-    }
-    return { minX, minY, maxX, maxY };
-}
-
-function emptyBounds() {
-    return { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-}
-
-function padBounds(b, pad, w, h) {
-    if (!isFinite(b.minX)) return { x: 0, y: 0, w, h };
-    const x = Math.max(0, b.minX - pad);
-    const y = Math.max(0, b.minY - pad);
-    return {
-        x, y,
-        w: Math.min(w, b.maxX + pad + 1) - x,
-        h: Math.min(h, b.maxY + pad + 1) - y
-    };
-}
+// PNG export: square, same framing as the MP4, saved at double resolution for sharpness
+const PNG_SIZE = 1080;
+const PNG_DENSITY = 2; // 2160 × 2160 pixels
 
 function exportPNG() {
     if (!generatedLetters.length) return;
-    const density = 3; // high resolution
-    const g = createGraphics(width, height);
-    g.pixelDensity(density);
+    const g = createGraphics(PNG_SIZE, PNG_SIZE);
+    g.pixelDensity(PNG_DENSITY);
 
-    // Draw on a transparent buffer first to find where the letters are
+    // The current frame, laid out to fill the square like the video
     drawScene(g, {
         time: animationState.time,
         animate: animationState.playing,
         type: animationState.type,
-        transparent: true
+        transparent: transparentBackground,
+        fill: true
     });
-    const src = g.elt;
-    const ctx = src.getContext('2d');
-    const bounds = contentBounds(ctx.getImageData(0, 0, src.width, src.height), emptyBounds());
-    const crop = padBounds(bounds, 40 * density, src.width, src.height);
 
     const out = document.createElement('canvas');
-    out.width = crop.w;
-    out.height = crop.h;
-    const octx = out.getContext('2d');
-    if (!transparentBackground) {
-        octx.fillStyle = invertColors ? '#000000' : '#ffffff';
-        octx.fillRect(0, 0, out.width, out.height);
-    }
-    octx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+    out.width = g.elt.width;
+    out.height = g.elt.height;
+    out.getContext('2d').drawImage(g.elt, 0, 0);
     g.remove();
 
     const name = fileName('png');
