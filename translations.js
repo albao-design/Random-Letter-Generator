@@ -180,6 +180,13 @@ function fitTitle() {
     }
     // Still too long on a very narrow phone: let it wrap instead
     if (h1.scrollWidth > h1.clientWidth) h1.classList.add('wrap');
+       // The description wraps so its lines end where the title ends
+       const desc = document.querySelector('header p');
+       if (desc) {
+           desc.style.maxWidth = h1.classList.contains('wrap')
+               ? ''
+               : Math.ceil(h1.getBoundingClientRect().width) + 'px';
+       }
 }
 
 window.addEventListener('resize', fitTitle);
