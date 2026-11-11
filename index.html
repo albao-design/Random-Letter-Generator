@@ -12,7 +12,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
     
     <!-- Our custom styles -->
-    <link rel="stylesheet" href="style.css?v=10">
+    <link rel="stylesheet" href="style.css?v=11">
     
     <!-- Preload key fonts for better performance -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -124,8 +124,7 @@
                 
                 <div class="section-content" id="animationsContent">
                     <div class="control-group">
-                        <label for="animationType" data-i18n="animationType">Animation Type</label>
-                        <select id="animationType" class="animation-select">
+                        <select id="animationType" class="animation-select" aria-label="Animation Type" data-i18n-aria="animationType">
                             <option value="none" data-i18n="animNone">None</option>
                             <option value="bounce" data-i18n="animBounce">Bounce</option>
                             <option value="chaos" data-i18n="animChaos">Chaos</option>
@@ -201,9 +200,9 @@
     <!-- Load our scripts -->
     <!-- Packs video frames into an MP4 file -->
     <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
-    <script src="fonts.js?v=10"></script>
-    <script src="translations.js?v=10"></script>
-    <script src="script.js?v=10"></script>
+    <script src="fonts.js?v=11"></script>
+    <script src="translations.js?v=11"></script>
+    <script src="script.js?v=11"></script>
     
     <!-- Service Worker for offline capabilities (optional) -->
     <script>
