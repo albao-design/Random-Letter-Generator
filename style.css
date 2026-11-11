@@ -42,7 +42,7 @@ header {
 }
 
 /* Title and description on the left; language toggle on the right,
-   lined up with the last line of the description */
+   centred on the description */
 .header-top {
     display: flex;
     align-items: flex-end;
@@ -59,7 +59,7 @@ header {
     margin-bottom: 8px;
 }
 
-/* Centre the toggle on the description's last line (toggle is taller than a line of text) */
+/* Lift the toggle so it's centred on the description (set in translations.js) */
 .header-top .lang-toggle {
     margin-bottom: var(--toggle-nudge, 0px);
 }

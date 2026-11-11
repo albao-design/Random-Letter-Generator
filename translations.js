@@ -120,12 +120,11 @@ const TRANSLATIONS = {
 
 const LANG_STORAGE_KEY = 'random-letters-language';
 
-// Saved choice first, then the device language, then English
+// Every visit starts fresh: nothing is remembered from last time.
+// The starting language follows the device (Spanish if the phone/computer is set to Spanish).
 function initialLanguage() {
-    try {
-        const saved = localStorage.getItem(LANG_STORAGE_KEY);
-        if (saved && TRANSLATIONS[saved]) return saved;
-    } catch (e) { /* storage unavailable */ }
+    // Clear any choice saved by an earlier version of the site
+    try { localStorage.removeItem(LANG_STORAGE_KEY); } catch (e) { /* storage unavailable */ }
     const device = (navigator.languages && navigator.languages[0]) || navigator.language || 'en';
     return device.toLowerCase().startsWith('es') ? 'es' : 'en';
 }
@@ -189,11 +188,10 @@ function fitTitle() {
         const titleTextWidth = range.getBoundingClientRect().width;
         desc.style.maxWidth = h1.classList.contains('wrap') ? '' : Math.ceil(titleTextWidth) + 'px';
 
-        // Line the language toggle up with the middle of the description's last line
+        // Centre the language toggle on the description (all of its lines)
         const toggle = document.querySelector('.header-top .lang-toggle');
         if (toggle) {
-            const lineHeight = parseFloat(getComputedStyle(desc).lineHeight) || 20;
-            const nudge = (lineHeight - toggle.offsetHeight) / 2;
+            const nudge = (desc.offsetHeight - toggle.offsetHeight) / 2;
             toggle.style.setProperty('--toggle-nudge', nudge + 'px');
         }
     }
@@ -204,7 +202,6 @@ window.addEventListener('resize', fitTitle);
 function setLanguage(lang) {
     if (!TRANSLATIONS[lang]) return;
     currentLang = lang;
-    try { localStorage.setItem(LANG_STORAGE_KEY, lang); } catch (e) { /* storage unavailable */ }
     applyTranslations();
 }
 

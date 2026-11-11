@@ -542,6 +542,7 @@ const nextTick = () => new Promise(r => setTimeout(r, 0));
 const VIDEO_SIZE = 1080;
 const VIDEO_FPS = 30;
 const VIDEO_TARGET_MS = 8000;
+const SHUFFLE_VIDEO_ROTATIONS = 3; // Shuffle videos: exactly 3 full cycles through the 6 font mixes
 const CHROMA_GREEN = [0, 255, 0]; // green-screen background used when "Transparent" is ticked
 const H264_CODECS = ['avc1.640028', 'avc1.4d0028', 'avc1.420028']; // High, Main, Baseline
 
@@ -582,7 +583,10 @@ function videoTimeline(type) {
     }
 
     const loopMs = span / speed;                                    // one loop in real time
-    const loops = Math.max(1, Math.round(VIDEO_TARGET_MS / loopMs));
+    // Shuffle: 3 complete rotations (length follows the Speed slider). Others: about 8 seconds.
+    const loops = type === 'shuffle'
+        ? SHUFFLE_VIDEO_ROTATIONS
+        : Math.max(1, Math.round(VIDEO_TARGET_MS / loopMs));
     const frames = Math.max(VIDEO_FPS, Math.round(loops * loopMs * VIDEO_FPS / 1000));
     return { start, step: (loops * span) / frames, frames };
 }
@@ -815,7 +819,28 @@ document.addEventListener('fontsready', () => {
     }
 });
 
+// Every visit starts fresh: put every control back to its original setting,
+// even if the browser tries to restore what was there last time
+function resetControlsToDefaults() {
+    document.querySelectorAll('.controls-panel input, .controls-panel textarea, .controls-panel select').forEach(el => {
+        if (el.type === 'checkbox') {
+            el.checked = el.defaultChecked;
+        } else if (el.tagName === 'SELECT') {
+            const original = Array.from(el.options).find(o => o.defaultSelected) || el.options[0];
+            el.value = original.value;
+        } else {
+            el.value = el.defaultValue;
+        }
+    });
+}
+
+// Coming "back" to the page from another site also starts fresh
+window.addEventListener('pageshow', e => {
+    if (e.persisted) window.location.reload();
+});
+
 document.addEventListener('DOMContentLoaded', function () {
+    resetControlsToDefaults();
     const textInput = document.getElementById('textInput');
     const generateBtn = document.getElementById('generateBtn');
     if (!textInput || !generateBtn) {
