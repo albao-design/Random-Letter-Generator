@@ -12,7 +12,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
     
     <!-- Our custom styles -->
-    <link rel="stylesheet" href="style.css?v=8">
+    <link rel="stylesheet" href="style.css?v=9">
     
     <!-- Preload key fonts for better performance -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,17 +22,24 @@
     <div class="app-container">
         <div class="controls-panel">
             <header>
-                <h1 data-i18n="title">Random Letter Generator</h1>
-                <p data-i18n="subtitle">Create expressive typography with mixed fonts and effects</p>
-                <div class="lang-toggle" role="group" aria-label="Language" data-i18n-aria="language">
-                    <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true" lang="en">EN</button>
-                    <button type="button" class="lang-btn" data-lang="es" aria-pressed="false" lang="es">ES</button>
+                <div class="header-top">
+                    <h1 data-i18n="title">Random Letter Generator</h1>
+                    <div class="lang-toggle" role="group" aria-label="Language" data-i18n-aria="language">
+                        <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true" lang="en">EN</button>
+                        <button type="button" class="lang-btn" data-lang="es" aria-pressed="false" lang="es">ES</button>
+                    </div>
                 </div>
+                <p data-i18n="subtitle">Create expressive typography with mixed fonts and effects</p>
             </header>
             
             <!-- TEXT INPUT SECTION -->
             <div class="input-section">
-                <label for="textInput" data-i18n="yourMessage">Your Message</label>
+                <div class="label-row">
+                    <label for="textInput" data-i18n="yourMessage">Your Message</label>
+                    <div class="char-counter" id="charCounter" aria-live="polite">
+                        <span id="charCount">0</span> / 30
+                    </div>
+                </div>
                 <textarea 
                     id="textInput" 
                     placeholder="Enter your message..." 
@@ -43,9 +50,6 @@
                     spellcheck="false"
                     aria-describedby="charCounter"
                 ></textarea>
-                <div class="char-counter" id="charCounter" aria-live="polite">
-                    <span id="charCount">0</span> / 30
-                </div>
                 <button id="generateBtn" type="button" data-i18n="generate">Generate</button>
             </div>
             
@@ -197,9 +201,9 @@
     <!-- Load our scripts -->
     <!-- Packs video frames into an MP4 file -->
     <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
-    <script src="fonts.js?v=8"></script>
-    <script src="translations.js?v=8"></script>
-    <script src="script.js?v=8"></script>
+    <script src="fonts.js?v=9"></script>
+    <script src="translations.js?v=9"></script>
+    <script src="script.js?v=9"></script>
     
     <!-- Service Worker for offline capabilities (optional) -->
     <script>

@@ -26,7 +26,7 @@ body {
 
 /* Left controls panel */
 .controls-panel {
-    width: 300px;
+    width: 400px;
     background: #111111;
     border-right: 1px solid #333;
     padding: 24px;
@@ -41,11 +41,25 @@ header {
     padding-bottom: 24px;
 }
 
+/* Title and language toggle share one line */
+.header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
 header h1 {
     font-size: 20px;
     font-weight: 600;
-    margin-bottom: 8px;
     color: #ffffff;
+    white-space: nowrap;   /* kept on one line; long titles shrink slightly to fit */
+    min-width: 0;
+}
+
+header h1.wrap {
+    white-space: normal;   /* last resort on very narrow screens */
 }
 
 header p {
@@ -57,7 +71,7 @@ header p {
 /* LANGUAGE TOGGLE (EN | ES) */
 .lang-toggle {
     display: inline-flex;
-    margin-top: 14px;
+    flex-shrink: 0;
     border: 1px solid #333;
     border-radius: 6px;
     overflow: hidden;
@@ -140,7 +154,7 @@ body.menu-light .lang-btn:hover:not(.active) {
     font-size: 14px;
     font-family: inherit;
     resize: none;
-    margin-bottom: 6px;
+    margin-bottom: 16px;
     transition: border-color 0.2s ease;
 }
 
@@ -154,11 +168,23 @@ body.menu-light .lang-btn:hover:not(.active) {
 }
 
 /* Character counter */
+/* "Your Message" label with the character count on the same line */
+.label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.input-section .label-row label {
+    margin-bottom: 0;
+}
+
 .char-counter {
     text-align: right;
     font-size: 12px;
     color: #888;
-    margin-bottom: 16px;
     font-variant-numeric: tabular-nums;
     transition: color 0.2s ease;
 }

@@ -159,8 +159,29 @@ function applyTranslations() {
         btn.setAttribute('aria-pressed', String(active));
     });
 
+    fitTitle();
     document.dispatchEvent(new Event('languagechange-app'));
 }
+
+// Keep the title on one line beside the language toggle: shrink it a little if needed
+const TITLE_MAX_PX = 20;
+const TITLE_MIN_PX = 15;
+
+function fitTitle() {
+    const h1 = document.querySelector('header h1');
+    if (!h1) return;
+    h1.classList.remove('wrap');
+    let size = TITLE_MAX_PX;
+    h1.style.fontSize = size + 'px';
+    while (h1.scrollWidth > h1.clientWidth && size > TITLE_MIN_PX) {
+        size -= 0.5;
+        h1.style.fontSize = size + 'px';
+    }
+    // Still too long on a very narrow phone: let it wrap instead
+    if (h1.scrollWidth > h1.clientWidth) h1.classList.add('wrap');
+}
+
+window.addEventListener('resize', fitTitle);
 
 function setLanguage(lang) {
     if (!TRANSLATIONS[lang]) return;
