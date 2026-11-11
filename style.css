@@ -63,8 +63,9 @@ header h1.wrap {
 }
 
 header p {
-    font-size: 12px;
-    color: #888;
+    font-size: 14px;
+    font-weight: 300;     /* light */
+    color: #ffffff;
     line-height: 1.4;
 }
 
@@ -137,9 +138,9 @@ body.menu-light .lang-btn:hover:not(.active) {
 
 .input-section label {
     display: block;
-    font-size: 12px;
-    font-weight: 500;
-    color: #ffffff;
+    font-size: 13px;      /* same size and weight as the slider labels (Blur, Stretch…) */
+    font-weight: 400;
+    color: #cccccc;
     margin-bottom: 8px;
 }
 
@@ -659,7 +660,8 @@ textarea:focus-visible {
         min-height: 64px;
     }
     
-    .control-group label {
+    .control-group label,
+    .input-section label {
         font-size: 12px;
     }
     
@@ -756,12 +758,11 @@ body.menu-light .collapsible-section {
 }
 
 body.menu-light header h1,
-body.menu-light .input-section label,
+body.menu-light header p,
 body.menu-light .section-header h3 {
     color: #111111;
 }
 
-body.menu-light header p,
 body.menu-light .range-value,
 body.menu-light .char-counter:not(.near):not(.full),
 body.menu-light .export-status,
@@ -770,6 +771,7 @@ body.menu-light .chevron {
 }
 
 body.menu-light .control-group label,
+body.menu-light .input-section label,
 body.menu-light .checkbox-row {
     color: #333333;
 }
