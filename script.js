@@ -39,10 +39,11 @@ let animationState = {
 // Animation timing constants
 const BOUNCE_DELAY = 90;        // ms between each letter starting, left to right
 const BOUNCE_RATE = 0.006;      // hop speed
-const CHAOS_LOOP = 4000;        // chaos motion repeats every 4s (so GIFs loop cleanly)
+const CHAOS_LOOP = 4000;        // chaos motion repeats every 4s (so videos loop cleanly)
 const TYPE_RATE = 8 / 1000;     // typewriter: 8 letters per second at 1x
 const TYPE_HOLD = 800;          // typewriter: 0.8s pause on the full message before replaying
 const SHUFFLE_STEP = 200;       // shuffle: new font mix every 200ms at 1x
+const SHUFFLE_VERSIONS = 6;     // shuffle: number of font mixes it cycles through
 const FLOAT_DELAY = 120;        // float: ms between each letter starting, left to right
 const FLOAT_RATE = 0.004;       // float: one gentle bob about every 1.6s at 1x
 const PULSE_DELAY = 80;         // pulse: ms between each letter starting, left to right
@@ -102,18 +103,24 @@ function draw() {
 // ------------------------------------------------------------
 // Generating the note
 // ------------------------------------------------------------
-function randomFont() {
+// Pick a random font, avoiding any in `exclude` when possible
+function randomFont(exclude = []) {
     const fonts = window.availableFonts.length ? window.availableFonts : ['Arial'];
-    return fonts[Math.floor(Math.random() * fonts.length)];
+    const choices = fonts.filter(f => !exclude.includes(f));
+    const pool = choices.length ? choices : fonts;
+    return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function makeLetters(text) {
-    return Array.from(text).map(char => {
+// `avoid` is a list of other versions of the same message: each letter gets a font
+// different from the one at the same position in those versions
+function makeLetters(text, avoid = []) {
+    return Array.from(text).map((char, i) => {
         if (char.trim() === '') return { char: ' ', isSpace: true };
+        const exclude = avoid.map(version => version[i] && version[i].font).filter(Boolean);
         return {
             char,
             isSpace: false,
-            font: randomFont(),
+            font: randomFont(exclude),
             sizeFactor: 0.75 + Math.random() * 0.55, // each letter's own size, relative to the Size slider
             tiltDir: Math.random() * 2 - 1           // each letter's own tilt direction/amount
         };
@@ -154,19 +161,26 @@ function generateLetters() {
     }
 
     generatedLetters = makeLetters(currentText);
+    // Shuffle versions: no letter keeps the same font from one flip to the next,
+    // including when the sequence loops from the last version back to the first
     shuffleVersions = [generatedLetters];
-    for (let v = 0; v < 5; v++) shuffleVersions.push(makeLetters(currentText));
+    for (let v = 1; v < SHUFFLE_VERSIONS; v++) {
+        const avoid = [shuffleVersions[v - 1]];
+        if (v === SHUFFLE_VERSIONS - 1) avoid.push(shuffleVersions[0]);
+        shuffleVersions.push(makeLetters(currentText, avoid));
+    }
     chaosParams = makeChaosParams(generatedLetters.filter(l => !l.isSpace).length);
 
     // If an animation is selected, play it straight away from the beginning
     animationState.time = 0;
     animationState.playing = animationState.type !== 'none';
+    resetPreparedVideo();
     updateAnimationButtons();
     updateExportButtons();
 }
 
 // ------------------------------------------------------------
-// Drawing (shared by the live canvas and the PNG/GIF exports)
+// Drawing (shared by the live canvas and the PNG/MP4 exports)
 // ------------------------------------------------------------
 function typewriterVisibleCount(t, total) {
     const typeDuration = total / TYPE_RATE;
@@ -210,12 +224,26 @@ function drawScene(g, opts) {
         effects.spacing * Math.max(0, items.length - 1);
     const tallest = items.reduce((m, it) => Math.max(m, it.size), 0);
 
-    // Shrink to fit if the note is wider or taller than the canvas
-    const fit = Math.min(
+    // On screen: shrink to fit if the note is wider or taller than the canvas
+    const screenFit = (w, h) => Math.min(
         1,
-        (g.width - 80) / Math.max(totalWidth, 1),
-        (g.height * 0.7) / Math.max(tallest * 1.2, 1)
+        (w - 80) / Math.max(totalWidth, 1),
+        (h * 0.7) / Math.max(tallest * 1.2, 1)
     );
+
+    let fit;
+    if (opts.fill) {
+        // Square video: scale the letters up or down to fill the frame, with a margin
+        fit = Math.min(
+            (g.width * 0.84) / Math.max(totalWidth, 1),
+            (g.height * 0.6) / Math.max(tallest * 1.2, 1)
+        );
+        // Keep blur looking the same as on screen at the new scale
+        blurScale = fit / screenFit(width, height);
+    } else {
+        fit = screenFit(g.width, g.height);
+        blurScale = 1;
+    }
 
     g.push();
     g.translate(g.width / 2, g.height / 2);
@@ -235,6 +263,9 @@ function drawScene(g, opts) {
 
     g.pop();
 }
+
+// How much to scale blur by (1 on screen; larger when letters are scaled up for video)
+let blurScale = 1;
 
 // p5 doesn't quote font names, and names with numbers (e.g. "Exo 2") break without quotes
 function cssFont(name) {
@@ -324,7 +355,7 @@ function drawBlurredText(g, ch, outlined) {
 
     ctx.shadowOffsetX = -m.a * away;
     ctx.shadowOffsetY = -m.b * away;
-    ctx.shadowBlur = effects.blur * 2 * g.pixelDensity();
+    ctx.shadowBlur = effects.blur * 2 * g.pixelDensity() * blurScale;
 
     const ink = inkColor(), paper = paperColor();
     const hex = v => v ? '#ffffff' : '#000000';
@@ -371,6 +402,7 @@ function changeAnimationType(newType) {
     // Picking an animation starts it right away (once there's a note to animate)
     animationState.playing = newType !== 'none' && generatedLetters.length > 0;
     updateAnimationButtons();
+    updateExportButtons();
 }
 
 function updateAnimationButtons() {
@@ -385,12 +417,19 @@ function updateAnimationButtons() {
 }
 
 // ------------------------------------------------------------
-// Export: PNG and GIF
+// Export: PNG
 // ------------------------------------------------------------
+const MP4_HINT = 'Pick an animation to export an MP4.';
+
 function updateExportButtons() {
     const hasNote = generatedLetters.length > 0;
+    const hasAnimation = animationState.type !== 'none';
     document.getElementById('exportPngBtn').disabled = !hasNote;
-    document.getElementById('exportGifBtn').disabled = !hasNote;
+    document.getElementById('exportMp4Btn').disabled = !hasNote || !hasAnimation || videoBusy;
+
+    const status = document.getElementById('exportStatus');
+    if (hasNote && !hasAnimation && !status.textContent) status.textContent = MP4_HINT;
+    if ((hasAnimation || !hasNote) && status.textContent === MP4_HINT) status.textContent = '';
 }
 
 function setExportStatus(msg) {
@@ -481,18 +520,30 @@ function exportPNG() {
     }, 'image/png');
 }
 
-// Work out how many frames to record so the GIF loops smoothly
-function gifTimeline(type) {
+const nextTick = () => new Promise(r => setTimeout(r, 0));
+
+// ------------------------------------------------------------
+// MP4 export: 1080 x 1080, 30fps, about 8 seconds of complete loops
+// ------------------------------------------------------------
+const VIDEO_SIZE = 1080;
+const VIDEO_FPS = 30;
+const VIDEO_TARGET_MS = 8000;
+const H264_CODECS = ['avc1.640028', 'avc1.4d0028', 'avc1.420028']; // High, Main, Baseline
+
+let preparedVideo = null; // finished video waiting for the user to tap "Save MP4" (phones)
+let videoBusy = false;
+
+// Work out frames so the video is made of whole loops (seamless when platforms repeat it)
+function videoTimeline(type) {
     const speed = animationState.speed;
-    const frameMs = 50; // 20 frames per second
     const letterCount = generatedLetters.filter(l => !l.isSpace).length;
     let start = 0;
-    let span; // animation time covered by the GIF
+    let span; // animation time of one loop
 
     switch (type) {
         case 'bounce':
-            start = (letterCount - 1) * BOUNCE_DELAY + 1;  // every letter already hopping
-            span = 2 * Math.PI / BOUNCE_RATE;               // two hops
+            start = (letterCount - 1) * BOUNCE_DELAY + 1;   // every letter already hopping
+            span = 2 * Math.PI / BOUNCE_RATE;
             break;
         case 'chaos':
             span = CHAOS_LOOP;
@@ -503,7 +554,7 @@ function gifTimeline(type) {
             break;
         case 'pulse':
             start = (letterCount - 1) * PULSE_DELAY + 1;
-            span = 2 * (2 * Math.PI / 0.01);
+            span = 2 * Math.PI / 0.01;
             break;
         case 'typewriter':
             span = generatedLetters.length / TYPE_RATE + TYPE_HOLD * speed;
@@ -512,72 +563,151 @@ function gifTimeline(type) {
             span = SHUFFLE_STEP * shuffleVersions.length;
             break;
         default:
-            return { start: 0, step: 0, frames: 1, delayCs: 100 };
+            return null;
     }
 
-    let frames = Math.round(span / speed / frameMs);
-    frames = Math.max(2, Math.min(frames, 200));
-    const step = span / frames;
-    const delayCs = Math.max(2, Math.round((span / speed / frames) / 10));
-    return { start, step, frames, delayCs };
+    const loopMs = span / speed;                                    // one loop in real time
+    const loops = Math.max(1, Math.round(VIDEO_TARGET_MS / loopMs));
+    const frames = Math.max(VIDEO_FPS, Math.round(loops * loopMs * VIDEO_FPS / 1000));
+    return { start, step: (loops * span) / frames, frames };
 }
 
-const nextTick = () => new Promise(r => setTimeout(r, 0));
+async function pickH264Codec() {
+    for (const codec of H264_CODECS) {
+        try {
+            const res = await VideoEncoder.isConfigSupported({
+                codec, width: VIDEO_SIZE, height: VIDEO_SIZE, bitrate: 8e6, framerate: VIDEO_FPS
+            });
+            if (res.supported) return codec;
+        } catch (e) { /* try the next one */ }
+    }
+    return null;
+}
 
-async function exportGIF() {
-    if (!generatedLetters.length) return;
-    const btn = document.getElementById('exportGifBtn');
-    btn.disabled = true;
+// Phones get the share sheet (Save Video / Instagram / TikTok…); computers get a download
+function shouldUseShareSheet(file) {
+    return window.matchMedia('(pointer: coarse)').matches &&
+        navigator.canShare && navigator.canShare({ files: [file] });
+}
+
+function resetPreparedVideo() {
+    if (!preparedVideo) return;
+    preparedVideo = null;
+    const btn = document.getElementById('exportMp4Btn');
+    btn.textContent = 'Download MP4';
+    btn.classList.remove('ready');
+    setExportStatus('');
+    updateExportButtons();
+}
+
+async function shareVideo() {
+    try {
+        await navigator.share({ files: [preparedVideo] });
+        setExportStatus('Done. Tap Save MP4 again to share it somewhere else.');
+    } catch (err) {
+        if (err && err.name === 'AbortError') {
+            setExportStatus('Cancelled. Tap Save MP4 to try again.');
+        } else {
+            downloadBlob(preparedVideo, preparedVideo.name); // share sheet unavailable: plain download
+            setExportStatus('MP4 downloaded.');
+        }
+    }
+}
+
+async function exportMP4() {
+    if (preparedVideo) return shareVideo();
+    if (!generatedLetters.length || animationState.type === 'none' || videoBusy) return;
+
+    const unsupported = 'This browser can’t create MP4 video. Please try the latest Chrome or Safari.';
+    if (!window.VideoEncoder || !window.VideoFrame || !window.Mp4Muxer) {
+        setExportStatus(unsupported);
+        return;
+    }
+    const codec = await pickH264Codec();
+    if (!codec) {
+        setExportStatus(unsupported);
+        return;
+    }
+
+    const btn = document.getElementById('exportMp4Btn');
+    videoBusy = true;
+    updateExportButtons();
+
+    const type = animationState.type;
+    const timeline = videoTimeline(type);
+    const g = createGraphics(VIDEO_SIZE, VIDEO_SIZE);
+    g.pixelDensity(1);
 
     try {
-        const type = animationState.type;
-        const timeline = gifTimeline(type);
-        const g = createGraphics(width, height);
-        g.pixelDensity(1);
-        const src = g.elt;
-        const ctx = src.getContext('2d', { willReadFrequently: true });
-        const render = f => drawScene(g, {
-            time: timeline.start + f * timeline.step,
-            animate: type !== 'none',
-            type,
-            transparent: true
+        const muxer = new Mp4Muxer.Muxer({
+            target: new Mp4Muxer.ArrayBufferTarget(),
+            video: { codec: 'avc', width: VIDEO_SIZE, height: VIDEO_SIZE, frameRate: VIDEO_FPS },
+            fastStart: 'in-memory'
         });
 
-        // Pass 1: find the area the letters move through
-        let bounds = emptyBounds();
+        let encodeError = null;
+        const encoder = new VideoEncoder({
+            output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+            error: e => { encodeError = e; }
+        });
+        encoder.configure({
+            codec,
+            width: VIDEO_SIZE,
+            height: VIDEO_SIZE,
+            bitrate: 8e6,
+            framerate: VIDEO_FPS
+        });
+
+        const frameDuration = 1e6 / VIDEO_FPS; // microseconds
         for (let f = 0; f < timeline.frames; f++) {
-            render(f);
-            bounds = contentBounds(ctx.getImageData(0, 0, src.width, src.height), bounds);
-            if (f % 5 === 0) {
-                setExportStatus(`Preparing GIF… ${Math.round(f / timeline.frames * 50)}%`);
+            if (encodeError) throw encodeError;
+            drawScene(g, {
+                time: timeline.start + f * timeline.step,
+                animate: true,
+                type,
+                transparent: false,
+                fill: true
+            });
+            const frame = new VideoFrame(g.elt, {
+                timestamp: Math.round(f * frameDuration),
+                duration: Math.round(frameDuration)
+            });
+            encoder.encode(frame, { keyFrame: f % (VIDEO_FPS * 2) === 0 });
+            frame.close();
+
+            // Don't let the encoder fall too far behind
+            while (encoder.encodeQueueSize > 4) await new Promise(r => setTimeout(r, 5));
+            if (f % 10 === 0) {
+                setExportStatus(`Creating MP4… ${Math.round(f / timeline.frames * 100)}%`);
                 await nextTick();
             }
         }
-        const crop = padBounds(bounds, 30, src.width, src.height);
 
-        // Pass 2: capture each frame
-        const frames = [];
-        for (let f = 0; f < timeline.frames; f++) {
-            render(f);
-            const img = ctx.getImageData(crop.x, crop.y, crop.w, crop.h);
-            frames.push(toGrayIndices(img.data, transparentBackground));
-            if (f % 5 === 0) {
-                setExportStatus(`Creating GIF… ${50 + Math.round(f / timeline.frames * 50)}%`);
-                await nextTick();
-            }
+        await encoder.flush();
+        if (encodeError) throw encodeError;
+        encoder.close();
+        muxer.finalize();
+
+        const seconds = (timeline.frames / VIDEO_FPS).toFixed(1);
+        const file = new File([muxer.target.buffer], fileName('mp4'), { type: 'video/mp4' });
+
+        if (shouldUseShareSheet(file)) {
+            // Phones need a fresh tap to open the share sheet
+            preparedVideo = file;
+            btn.textContent = 'Save MP4';
+            btn.classList.add('ready');
+            setExportStatus(`Video ready (${seconds}s). Tap Save MP4 to save or share it.`);
+        } else {
+            downloadBlob(file, file.name);
+            setExportStatus(`MP4 saved (${seconds}s, ${VIDEO_SIZE} × ${VIDEO_SIZE})`);
         }
-        g.remove();
-
-        const bytes = encodeGIF(frames, crop.w, crop.h, timeline.delayCs, transparentBackground);
-        downloadBlob(new Blob([bytes], { type: 'image/gif' }), fileName('gif'));
-        setExportStatus(type === 'none'
-            ? 'GIF saved (still image — pick an animation to make it move)'
-            : `GIF saved (${timeline.frames} frames)`);
     } catch (err) {
         console.error(err);
-        setExportStatus('GIF could not be created. Try a shorter message or a smaller Size.');
+        setExportStatus('The video couldn’t be created. Try a shorter message or reload the page.');
     } finally {
-        btn.disabled = generatedLetters.length === 0;
+        g.remove();
+        videoBusy = false;
+        updateExportButtons();
     }
 }
 
@@ -714,126 +844,13 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     document.getElementById('exportPngBtn').addEventListener('click', exportPNG);
-    document.getElementById('exportGifBtn').addEventListener('click', exportGIF);
+    document.getElementById('exportMp4Btn').addEventListener('click', exportMP4);
+
+    // Any change to the message or settings makes a prepared video out of date
+    const panel = document.querySelector('.controls-panel');
+    panel.addEventListener('input', resetPreparedVideo);
+    panel.addEventListener('change', resetPreparedVideo);
 
     updateAnimationButtons();
     updateExportButtons();
 });
-
-// ------------------------------------------------------------
-// Minimal GIF encoder (grayscale palette — the notes are black and white)
-// ------------------------------------------------------------
-const GIF_TRANSPARENT_INDEX = 255;
-
-// Convert RGBA pixels to palette indices
-function toGrayIndices(rgba, transparent) {
-    const n = rgba.length / 4;
-    const out = new Uint8Array(n);
-    for (let i = 0; i < n; i++) {
-        const r = rgba[i * 4], gr = rgba[i * 4 + 1], b = rgba[i * 4 + 2], a = rgba[i * 4 + 3];
-        const lum = 0.299 * r + 0.587 * gr + 0.114 * b;
-        if (transparent) {
-            // GIF transparency is on/off only, so soft edges are cut at half opacity
-            out[i] = a < 128 ? GIF_TRANSPARENT_INDEX : Math.round(lum * 254 / 255);
-        } else {
-            // Composite onto the background colour (white, or black when inverted)
-            const v = lum * (a / 255) + paperColor() * (1 - a / 255);
-            out[i] = Math.round(v);
-        }
-    }
-    return out;
-}
-
-function gifPalette(transparent) {
-    const pal = new Uint8Array(256 * 3);
-    for (let i = 0; i < 256; i++) {
-        const v = transparent ? Math.min(255, Math.round(i * 255 / 254)) : i;
-        pal[i * 3] = pal[i * 3 + 1] = pal[i * 3 + 2] = v;
-    }
-    return pal;
-}
-
-function lzwEncode(indices, minCodeSize, out) {
-    const clearCode = 1 << minCodeSize;
-    const eoiCode = clearCode + 1;
-    let codeSize = minCodeSize + 1;
-    let nextCode = eoiCode + 1;
-    let dict = new Map();
-
-    const bytes = [];
-    let bitBuf = 0, bitCount = 0;
-    const emit = code => {
-        bitBuf |= code << bitCount;
-        bitCount += codeSize;
-        while (bitCount >= 8) {
-            bytes.push(bitBuf & 0xff);
-            bitBuf >>>= 8;
-            bitCount -= 8;
-        }
-    };
-
-    emit(clearCode);
-    let prefix = indices[0];
-    for (let i = 1; i < indices.length; i++) {
-        const k = indices[i];
-        const key = prefix * 256 + k;
-        const found = dict.get(key);
-        if (found !== undefined) {
-            prefix = found;
-            continue;
-        }
-        emit(prefix);
-        if (nextCode < 4096) {
-            dict.set(key, nextCode++);
-            if (nextCode > (1 << codeSize) && codeSize < 12) codeSize++;
-        } else {
-            emit(clearCode);
-            dict = new Map();
-            codeSize = minCodeSize + 1;
-            nextCode = eoiCode + 1;
-        }
-        prefix = k;
-    }
-    emit(prefix);
-    emit(eoiCode);
-    if (bitCount > 0) bytes.push(bitBuf & 0xff);
-
-    // Split into sub-blocks of up to 255 bytes
-    out.push(minCodeSize);
-    for (let i = 0; i < bytes.length; i += 255) {
-        const chunk = bytes.slice(i, i + 255);
-        out.push(chunk.length, ...chunk);
-    }
-    out.push(0);
-}
-
-function encodeGIF(frames, w, h, delayCs, transparent) {
-    const out = [];
-    const u16 = v => out.push(v & 0xff, (v >> 8) & 0xff);
-    const str = s => { for (const c of s) out.push(c.charCodeAt(0)); };
-
-    str('GIF89a');
-    u16(w); u16(h);
-    out.push(0xf7, 0, 0);                 // 256-colour global palette
-    out.push(...gifPalette(transparent));
-
-    if (frames.length > 1) {              // loop forever
-        out.push(0x21, 0xff, 0x0b);
-        str('NETSCAPE2.0');
-        out.push(0x03, 0x01, 0x00, 0x00, 0x00);
-    }
-
-    for (const frame of frames) {
-        // Graphic control: delay, and clear each frame when transparent
-        out.push(0x21, 0xf9, 0x04, transparent ? (2 << 2) | 1 : (1 << 2));
-        u16(delayCs);
-        out.push(transparent ? GIF_TRANSPARENT_INDEX : 0, 0);
-        // Image descriptor
-        out.push(0x2c);
-        u16(0); u16(0); u16(w); u16(h);
-        out.push(0);
-        lzwEncode(frame, 8, out);
-    }
-    out.push(0x3b);
-    return new Uint8Array(out);
-}

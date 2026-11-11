@@ -438,6 +438,14 @@ input[type="range"]::-moz-range-track {
     background: #0056b3;
 }
 
+.export-btn.ready {
+    background: #1f9d55;
+}
+
+.export-btn.ready:hover:not(:disabled) {
+    background: #198a4a;
+}
+
 .export-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
