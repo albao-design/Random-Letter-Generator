@@ -22,6 +22,11 @@ let effects = {
 };
 
 let transparentBackground = false;
+let invertColors = false; // white letters on black instead of black on white
+
+// Letter colour and background colour (0 = black, 255 = white)
+const inkColor = () => invertColors ? 255 : 0;
+const paperColor = () => invertColors ? 0 : 255;
 
 // Animation state. `time` is animation time in ms (real time x speed).
 let animationState = {
@@ -84,7 +89,7 @@ function draw() {
             transparent: transparentBackground
         });
     } else {
-        if (transparentBackground) clear(); else background(255);
+        if (transparentBackground) clear(); else background(paperColor());
         fill(150);
         noStroke();
         textAlign(CENTER, CENTER);
@@ -175,7 +180,7 @@ function typewriterVisibleCount(t, total) {
 function drawScene(g, opts) {
     const { time, animate, type, transparent } = opts;
 
-    if (transparent) g.clear(); else g.background(255);
+    if (transparent) g.clear(); else g.background(paperColor());
 
     let letters = generatedLetters;
     if (animate && type === 'shuffle' && shuffleVersions.length) {
@@ -296,11 +301,11 @@ function drawLetter(g, it, x, letterIndex, t, type) {
         drawBlurredText(g, l.char, outlined);
     } else {
         if (outlined) {
-            g.fill(255);
-            g.stroke(0);
+            g.fill(paperColor());
+            g.stroke(inkColor());
             g.strokeWeight(effects.strokeWeight);
         } else {
-            g.fill(0);
+            g.fill(inkColor());
             g.noStroke();
         }
         g.text(l.char, 0, 0);
@@ -321,21 +326,24 @@ function drawBlurredText(g, ch, outlined) {
     ctx.shadowOffsetY = -m.b * away;
     ctx.shadowBlur = effects.blur * 2 * g.pixelDensity();
 
+    const ink = inkColor(), paper = paperColor();
+    const hex = v => v ? '#ffffff' : '#000000';
+
     if (outlined) {
-        ctx.shadowColor = '#ffffff';
+        ctx.shadowColor = hex(paper);
         g.noStroke();
-        g.fill(255);
+        g.fill(paper);
         g.text(ch, away, 0);
 
-        ctx.shadowColor = '#000000';
+        ctx.shadowColor = hex(ink);
         g.noFill();
-        g.stroke(0);
+        g.stroke(ink);
         g.strokeWeight(effects.strokeWeight);
         g.text(ch, away, 0);
     } else {
-        ctx.shadowColor = '#000000';
+        ctx.shadowColor = hex(ink);
         g.noStroke();
-        g.fill(0);
+        g.fill(ink);
         g.text(ch, away, 0);
     }
     // push()/pop() around each letter restores the shadow settings
@@ -461,7 +469,7 @@ function exportPNG() {
     out.height = crop.h;
     const octx = out.getContext('2d');
     if (!transparentBackground) {
-        octx.fillStyle = '#ffffff';
+        octx.fillStyle = invertColors ? '#000000' : '#ffffff';
         octx.fillRect(0, 0, out.width, out.height);
     }
     octx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
@@ -693,6 +701,12 @@ document.addEventListener('DOMContentLoaded', function () {
         changeAnimationType(this.value);
     });
 
+    document.getElementById('invertColors').addEventListener('change', function () {
+        invertColors = this.checked;
+        document.querySelector('.canvas-container').classList.toggle('inverted', this.checked);
+        document.body.classList.toggle('menu-light', this.checked); // menu flips too
+    });
+
     const transparentBox = document.getElementById('transparentBg');
     transparentBox.addEventListener('change', function () {
         transparentBackground = this.checked;
@@ -722,8 +736,8 @@ function toGrayIndices(rgba, transparent) {
             // GIF transparency is on/off only, so soft edges are cut at half opacity
             out[i] = a < 128 ? GIF_TRANSPARENT_INDEX : Math.round(lum * 254 / 255);
         } else {
-            // Composite onto white
-            const v = lum * (a / 255) + 255 * (1 - a / 255);
+            // Composite onto the background colour (white, or black when inverted)
+            const v = lum * (a / 255) + paperColor() * (1 - a / 255);
             out[i] = Math.round(v);
         }
     }

@@ -382,6 +382,20 @@ input[type="range"]::-moz-range-track {
     background-position: 0 0, 0 10px, 10px -10px, -10px 0;
 }
 
+/* Inverted: black behind the canvas, and a dark checkerboard when transparent */
+.canvas-container.inverted {
+    background-color: #000000;
+}
+
+.canvas-container.inverted.transparent-preview {
+    background-color: #1a1a1a;
+    background-image:
+        linear-gradient(45deg, #2c2c2c 25%, transparent 25%),
+        linear-gradient(-45deg, #2c2c2c 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #2c2c2c 75%),
+        linear-gradient(-45deg, transparent 75%, #2c2c2c 75%);
+}
+
 /* EXPORT CONTROLS */
 .checkbox-row {
     display: flex;
@@ -389,7 +403,7 @@ input[type="range"]::-moz-range-track {
     gap: 10px;
     font-size: 13px;
     color: #cccccc;
-    margin: 14px 0 0;
+    margin: 12px 0 0;
     cursor: pointer;
 }
 
@@ -633,6 +647,88 @@ textarea:focus-visible {
     input[type="range"]::-moz-range-thumb {
         transition: none;
     }
+}
+
+/* LIGHT MENU: used when Invert is on, so the menu contrasts with the black canvas */
+body.menu-light .controls-panel {
+    background: #f4f4f4;
+    border-color: #dddddd;
+}
+
+body.menu-light header,
+body.menu-light .input-section,
+body.menu-light .collapsible-section {
+    border-color: #dddddd;
+}
+
+body.menu-light header h1,
+body.menu-light .input-section label,
+body.menu-light .section-header h3 {
+    color: #111111;
+}
+
+body.menu-light header p,
+body.menu-light .range-value,
+body.menu-light .char-counter:not(.near):not(.full),
+body.menu-light .export-status,
+body.menu-light .chevron {
+    color: #666666;
+}
+
+body.menu-light .control-group label,
+body.menu-light .checkbox-row {
+    color: #333333;
+}
+
+body.menu-light .section-header.expanded h3,
+body.menu-light .section-header:hover h3 {
+    color: #0066cc;
+}
+
+body.menu-light .input-section textarea,
+body.menu-light .animation-select,
+body.menu-light .animation-select option {
+    background-color: #ffffff;
+    border-color: #cccccc;
+    color: #111111;
+}
+
+body.menu-light .input-section textarea::placeholder {
+    color: #999999;
+}
+
+body.menu-light input[type="range"] {
+    background: #d4d4d4;
+}
+
+body.menu-light input[type="range"]::-moz-range-track {
+    background: #d4d4d4;
+}
+
+body.menu-light .animation-btn {
+    background: #e2e2e2;
+    color: #111111;
+}
+
+body.menu-light .animation-btn:hover:not(:disabled) {
+    background: #d6d6d6;
+}
+
+body.menu-light .animation-btn.active {
+    background: #0066cc;
+    color: #ffffff;
+}
+
+body.menu-light .controls-panel::-webkit-scrollbar-track {
+    background: #eeeeee;
+}
+
+body.menu-light .controls-panel::-webkit-scrollbar-thumb {
+    background: #cccccc;
+}
+
+.controls-panel {
+    transition: background-color 0.2s ease;
 }
 
 /* PRINT STYLES */
