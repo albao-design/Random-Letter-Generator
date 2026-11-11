@@ -96,7 +96,7 @@ function draw() {
         textAlign(CENTER, CENTER);
         textFont('Arial');
         textSize(16);
-        text(window.fontsReady ? 'Enter your message and click Generate' : 'Loading fonts…', width / 2, height / 2);
+        text(window.fontsReady ? t('emptyCanvas') : t('loadingFonts'), width / 2, height / 2);
     }
 }
 
@@ -421,21 +421,50 @@ function updateAnimationButtons() {
 // ------------------------------------------------------------
 // Export: PNG
 // ------------------------------------------------------------
-const MP4_HINT = 'Pick an animation to export an MP4.';
-
 function updateExportButtons() {
     const hasNote = generatedLetters.length > 0;
     const hasAnimation = animationState.type !== 'none';
     document.getElementById('exportPngBtn').disabled = !hasNote;
     document.getElementById('exportMp4Btn').disabled = !hasNote || !hasAnimation || videoBusy;
 
-    const status = document.getElementById('exportStatus');
-    if (hasNote && !hasAnimation && !status.textContent) status.textContent = MP4_HINT;
-    if ((hasAnimation || !hasNote) && status.textContent === MP4_HINT) status.textContent = '';
+    if (hasNote && !hasAnimation && !lastStatus) setExportStatus('mp4Hint');
+    if ((hasAnimation || !hasNote) && lastStatus && lastStatus.key === 'mp4Hint') setExportStatus(null);
 }
 
-function setExportStatus(msg) {
-    document.getElementById('exportStatus').textContent = msg;
+// Status line under the export buttons. Messages are stored by name (see translations.js)
+// so they switch language along with everything else.
+let lastStatus = null;
+
+function setExportStatus(key, vars = {}, tipKey = null) {
+    lastStatus = key ? { key, vars, tipKey } : null;
+    renderExportStatus();
+}
+
+function renderExportStatus() {
+    const el = document.getElementById('exportStatus');
+    if (!el) return;
+    el.textContent = lastStatus
+        ? t(lastStatus.key, lastStatus.vars) + (lastStatus.tipKey ? ' ' + t(lastStatus.tipKey) : '')
+        : '';
+}
+
+function updateMp4ButtonLabel() {
+    const btn = document.getElementById('exportMp4Btn');
+    if (btn) btn.textContent = preparedVideo ? t('saveMp4') : t('downloadMp4');
+}
+
+function isTouchDevice() {
+    return window.matchMedia('(pointer: coarse)').matches;
+}
+
+// Turn a canvas image into a file right away (keeps the tap "fresh" for the share sheet)
+function dataUrlToFile(dataUrl, name) {
+    const [header, base64] = dataUrl.split(',');
+    const type = header.match(/:(.*?);/)[1];
+    const bytes = atob(base64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    return new File([arr], name, { type });
 }
 
 function downloadBlob(blob, filename) {
@@ -516,9 +545,30 @@ function exportPNG() {
     octx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
     g.remove();
 
+    const name = fileName('png');
+    const size = { w: out.width, h: out.height };
+
+    // Phones: open the share sheet so "Save Image" puts it straight into Photos/Gallery
+    if (isTouchDevice() && navigator.canShare) {
+        const file = dataUrlToFile(out.toDataURL('image/png'), name);
+        if (navigator.canShare({ files: [file] })) {
+            navigator.share({ files: [file] })
+                .then(() => setExportStatus('pngShared'))
+                .catch(err => {
+                    if (err && err.name === 'AbortError') {
+                        setExportStatus('pngCancelled');
+                    } else {
+                        downloadBlob(file, name);
+                        setExportStatus('pngSaved', size);
+                    }
+                });
+            return;
+        }
+    }
+
     out.toBlob(blob => {
-        downloadBlob(blob, fileName('png'));
-        setExportStatus(`PNG saved (${out.width} × ${out.height}px)`);
+        downloadBlob(blob, name);
+        setExportStatus('pngSaved', size);
     }, 'image/png');
 }
 
@@ -589,30 +639,28 @@ async function pickH264Codec() {
 
 // Phones get the share sheet (Save Video / Instagram / TikTok…); computers get a download
 function shouldUseShareSheet(file) {
-    return window.matchMedia('(pointer: coarse)').matches &&
-        navigator.canShare && navigator.canShare({ files: [file] });
+    return isTouchDevice() && navigator.canShare && navigator.canShare({ files: [file] });
 }
 
 function resetPreparedVideo() {
     if (!preparedVideo) return;
     preparedVideo = null;
-    const btn = document.getElementById('exportMp4Btn');
-    btn.textContent = 'Download MP4';
-    btn.classList.remove('ready');
-    setExportStatus('');
+    document.getElementById('exportMp4Btn').classList.remove('ready');
+    updateMp4ButtonLabel();
+    setExportStatus(null);
     updateExportButtons();
 }
 
 async function shareVideo() {
     try {
         await navigator.share({ files: [preparedVideo] });
-        setExportStatus('Done. Tap Save MP4 again to share it somewhere else.');
+        setExportStatus('shareDone');
     } catch (err) {
         if (err && err.name === 'AbortError') {
-            setExportStatus('Cancelled. Tap Save MP4 to try again.');
+            setExportStatus('shareCancelled');
         } else {
             downloadBlob(preparedVideo, preparedVideo.name); // share sheet unavailable: plain download
-            setExportStatus('MP4 downloaded.');
+            setExportStatus('mp4Downloaded');
         }
     }
 }
@@ -621,14 +669,13 @@ async function exportMP4() {
     if (preparedVideo) return shareVideo();
     if (!generatedLetters.length || animationState.type === 'none' || videoBusy) return;
 
-    const unsupported = 'This browser can’t create MP4 video. Please try the latest Chrome or Safari.';
     if (!window.VideoEncoder || !window.VideoFrame || !window.Mp4Muxer) {
-        setExportStatus(unsupported);
+        setExportStatus('mp4Unsupported');
         return;
     }
     const codec = await pickH264Codec();
     if (!codec) {
-        setExportStatus(unsupported);
+        setExportStatus('mp4Unsupported');
         return;
     }
 
@@ -683,7 +730,7 @@ async function exportMP4() {
             // Don't let the encoder fall too far behind
             while (encoder.encodeQueueSize > 4) await new Promise(r => setTimeout(r, 5));
             if (f % 10 === 0) {
-                setExportStatus(`Creating MP4… ${Math.round(f / timeline.frames * 100)}%`);
+                setExportStatus('creatingMp4', { p: Math.round(f / timeline.frames * 100) });
                 await nextTick();
             }
         }
@@ -696,21 +743,21 @@ async function exportMP4() {
         const seconds = (timeline.frames / VIDEO_FPS).toFixed(1);
         const name = greenScreen ? fileName('mp4').replace(/\.mp4$/, '-greenscreen.mp4') : fileName('mp4');
         const file = new File([muxer.target.buffer], name, { type: 'video/mp4' });
-        const tip = greenScreen ? ' Use Chroma Key in your editing app to remove the green.' : '';
+        const tip = greenScreen ? 'chromaTip' : null;
 
         if (shouldUseShareSheet(file)) {
             // Phones need a fresh tap to open the share sheet
             preparedVideo = file;
-            btn.textContent = 'Save MP4';
             btn.classList.add('ready');
-            setExportStatus(`Video ready (${seconds}s). Tap Save MP4 to save or share it.${tip}`);
+            updateMp4ButtonLabel();
+            setExportStatus('videoReady', { s: seconds }, tip);
         } else {
             downloadBlob(file, file.name);
-            setExportStatus(`MP4 saved (${seconds}s, ${VIDEO_SIZE} × ${VIDEO_SIZE}).${tip}`);
+            setExportStatus('mp4Saved', { s: seconds }, tip);
         }
     } catch (err) {
         console.error(err);
-        setExportStatus('The video couldn’t be created. Try a shorter message or reload the page.');
+        setExportStatus('mp4Error');
     } finally {
         g.remove();
         videoBusy = false;
@@ -858,6 +905,13 @@ document.addEventListener('DOMContentLoaded', function () {
     panel.addEventListener('input', resetPreparedVideo);
     panel.addEventListener('change', resetPreparedVideo);
 
+    // Switching language re-shows the status line and button labels
+    document.addEventListener('languagechange-app', () => {
+        renderExportStatus();
+        updateMp4ButtonLabel();
+    });
+
+    updateMp4ButtonLabel();
     updateAnimationButtons();
     updateExportButtons();
 });

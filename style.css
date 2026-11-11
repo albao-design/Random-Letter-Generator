@@ -54,6 +54,66 @@ header p {
     line-height: 1.4;
 }
 
+/* LANGUAGE TOGGLE (EN | ES) */
+.lang-toggle {
+    display: inline-flex;
+    margin-top: 14px;
+    border: 1px solid #333;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.lang-btn {
+    padding: 5px 12px;
+    background: transparent;
+    color: #888;
+    border: none;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.lang-btn + .lang-btn {
+    border-left: 1px solid #333;
+}
+
+.lang-btn:hover:not(.active) {
+    color: #ffffff;
+}
+
+.lang-btn.active {
+    background: #0066cc;
+    color: #ffffff;
+}
+
+.lang-btn:focus-visible {
+    outline: 2px solid #0066cc;
+    outline-offset: -2px;
+}
+
+body.menu-light .lang-toggle,
+body.menu-light .lang-btn + .lang-btn {
+    border-color: #cccccc;
+}
+
+body.menu-light .lang-btn:not(.active) {
+    color: #666666;
+}
+
+body.menu-light .lang-btn:hover:not(.active) {
+    color: #111111;
+}
+
+@media (pointer: coarse) {
+    .lang-btn {
+        padding: 9px 16px;
+        font-size: 13px;
+    }
+}
+
 /* INPUT SECTION STYLES */
 .input-section {
     margin-bottom: 32px;
