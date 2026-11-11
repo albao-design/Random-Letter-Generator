@@ -1,582 +1,825 @@
-// Global variables to store our data and settings
-let currentText = '';
-let generatedLetters = [];
-let canvasWidth = 800;
-let canvasHeight = 600;
+// ============================================================
+// Random Letter Generator
+// ============================================================
 
-// Effect settings - controlled by user sliders
+const MAX_CHARS = 30;
+
+// Message and generated letters
+let currentText = '';
+let generatedLetters = [];   // one entry per character
+let shuffleVersions = [];    // alternative font mixes for the Shuffle animation
+let chaosParams = [];        // per-letter random motion for the Chaos animation
+let pendingGenerate = false; // Generate was clicked before fonts finished loading
+
+// Effect settings - controlled by the sliders
 let effects = {
     blur: 0,
-    spacing: 20,
+    spacing: 6,
     stretch: 100,
-    sizeVariation: 24,
+    size: 64,
     strokeWeight: 0,
-    distortion: 0
+    tilt: 0
 };
 
-// Animation system
+let transparentBackground = false;
+
+// Animation state. `time` is animation time in ms (real time x speed).
 let animationState = {
     type: 'none',
     playing: false,
-    paused: false,
     speed: 1,
-    startTime: 0,
-    pauseTime: 0,
-    totalPausedTime: 0
+    time: 0
 };
 
-// Animation-specific variables
-let typewriterProgress = 0;
-let bounceOffsets = [];
-let chaosOffsets = [];
-let floatOffsets = [];
-let pulseOffsets = [];
+// Animation timing constants
+const BOUNCE_DELAY = 90;        // ms between each letter starting, left to right
+const BOUNCE_RATE = 0.006;      // hop speed
+const CHAOS_LOOP = 4000;        // chaos motion repeats every 4s (so GIFs loop cleanly)
+const TYPE_RATE = 8 / 1000;     // typewriter: 8 letters per second at 1x
+const TYPE_HOLD = 800;          // typewriter: 0.8s pause on the full message before replaying
+const SHUFFLE_STEP = 200;       // shuffle: new font mix every 200ms at 1x
+const FLOAT_DELAY = 120;        // float: ms between each letter starting, left to right
+const FLOAT_RATE = 0.004;       // float: one gentle bob about every 1.6s at 1x
+const PULSE_DELAY = 80;         // pulse: ms between each letter starting, left to right
 
-// Shuffle animation variables
-let shuffleVersions = [];
-let currentShuffleIndex = 0;
-let shuffleTimer = 0;
-
-// P5.js setup function
+// ------------------------------------------------------------
+// p5.js setup / draw
+// ------------------------------------------------------------
 function setup() {
-    const container = document.querySelector('.canvas-container');
-    canvasWidth = container.clientWidth;
-    canvasHeight = container.clientHeight;
-    
-    let canvas = createCanvas(canvasWidth, canvasHeight);
+    const container = document.getElementById('p5-container');
+    const canvas = createCanvas(container.clientWidth, container.clientHeight);
     canvas.parent('p5-container');
-    
-    textAlign(CENTER, CENTER);
-    
-    console.log(`Canvas setup complete: ${canvasWidth}x${canvasHeight}`);
+
+    // Keep the canvas exactly the size of its area (window resize, panels, mobile bars)
+    if (window.ResizeObserver) {
+        new ResizeObserver(fitCanvasToContainer).observe(container);
+    }
 }
 
-// Handle window resize
 function windowResized() {
-    const container = document.querySelector('.canvas-container');
-    canvasWidth = container.clientWidth;
-    canvasHeight = container.clientHeight;
-    resizeCanvas(canvasWidth, canvasHeight);
+    fitCanvasToContainer();
 }
 
-// P5.js draw function
+function fitCanvasToContainer() {
+    const container = document.getElementById('p5-container');
+    if (!container || typeof resizeCanvas !== 'function') return;
+    const w = Math.max(1, container.clientWidth);
+    const h = Math.max(1, container.clientHeight);
+    if (w !== width || h !== height) resizeCanvas(w, h);
+}
+
 function draw() {
-    background(255);
-    
+    if (animationState.playing) {
+        // deltaTime is capped so returning to a background tab doesn't jump ahead
+        animationState.time += Math.min(deltaTime, 100) * animationState.speed;
+    }
+
+    const p = p5.instance;
+
     if (generatedLetters.length > 0) {
-        updateAnimations();
-        drawRansomNote();
+        drawScene(p, {
+            time: animationState.time,
+            animate: animationState.playing,
+            type: animationState.type,
+            transparent: transparentBackground
+        });
     } else {
+        if (transparentBackground) clear(); else background(255);
         fill(150);
         noStroke();
         textAlign(CENTER, CENTER);
-        textFont('Arial', 16);
-        text('Enter your message and click Generate', width/2, height/2);
+        textFont('Arial');
+        textSize(16);
+        text(window.fontsReady ? 'Enter your message and click Generate' : 'Loading fonts…', width / 2, height / 2);
     }
 }
 
-// Generate ransom note
-function generateRansomNote() {
-    if (!currentText || currentText.trim() === '') {
-        console.log('No text to generate');
+// ------------------------------------------------------------
+// Generating the note
+// ------------------------------------------------------------
+function randomFont() {
+    const fonts = window.availableFonts.length ? window.availableFonts : ['Arial'];
+    return fonts[Math.floor(Math.random() * fonts.length)];
+}
+
+function makeLetters(text) {
+    return Array.from(text).map(char => {
+        if (char.trim() === '') return { char: ' ', isSpace: true };
+        return {
+            char,
+            isSpace: false,
+            font: randomFont(),
+            sizeFactor: 0.75 + Math.random() * 0.55, // each letter's own size, relative to the Size slider
+            tiltDir: Math.random() * 2 - 1           // each letter's own tilt direction/amount
+        };
+    });
+}
+
+function randInt(min, max) {
+    return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function makeChaosParams(count) {
+    const params = [];
+    for (let i = 0; i < count; i++) {
+        params.push({
+            ax: 0.12 + Math.random() * 0.28,         // horizontal range (x letter size)
+            ay: 0.12 + Math.random() * 0.28,         // vertical range
+            kx1: randInt(1, 4), kx2: randInt(4, 8),  // whole-number speeds so the motion loops
+            ky1: randInt(1, 4), ky2: randInt(4, 8),
+            px1: Math.random() * TWO_PI, px2: Math.random() * TWO_PI,
+            py1: Math.random() * TWO_PI, py2: Math.random() * TWO_PI,
+            rot: (4 + Math.random() * 16) * (Math.random() < 0.5 ? -1 : 1), // degrees
+            kr: randInt(1, 4), pr: Math.random() * TWO_PI,
+            scl: Math.random() * 0.18,
+            ks: randInt(1, 5), ps: Math.random() * TWO_PI
+        });
+    }
+    return params;
+}
+
+function generateLetters() {
+    currentText = sanitizeText(document.getElementById('textInput').value);
+    if (currentText.trim() === '') return;
+
+    if (!window.fontsReady) {
+        pendingGenerate = true;
+        showLoading(true);
         return;
     }
-    
-    console.log('Generating ransom note for:', currentText);
-    generatedLetters = [];
-    
-    // Ensure fonts are available
-    const fontsToUse = window.availableFonts || ['Arial', 'Times', 'Helvetica'];
-    
-    for (let i = 0; i < currentText.length; i++) {
-        const char = currentText[i];
-        
-        if (char === ' ') {
-            generatedLetters.push({
-                char: ' ',
-                isSpace: true
-            });
-            continue;
-        }
-        
-        if (char.trim() === '') {
-            generatedLetters.push({
-                char: char,
-                isSpace: true
-            });
-            continue;
-        }
-        
-        const randomFont = fontsToUse[Math.floor(Math.random() * fontsToUse.length)];
-        
-        const letterData = {
-            char: char,
-            isSpace: false,
-            font: randomFont,
-            baseSize: 30 + Math.random() * 20,
-            baseSizeMultiplier: 0.7 + Math.random() * 0.6,
-            baseDistortionX: (Math.random() - 0.5) * 2,
-            baseDistortionY: (Math.random() - 0.5) * 2,
-        };
-        
-        generatedLetters.push(letterData);
-    }
-    
-    initializeAnimationArrays();
-    generateShuffleVersions();
-    resetAnimation();
-    
-    console.log(`Generated ${generatedLetters.length} characters with varied fonts`);
+
+    generatedLetters = makeLetters(currentText);
+    shuffleVersions = [generatedLetters];
+    for (let v = 0; v < 5; v++) shuffleVersions.push(makeLetters(currentText));
+    chaosParams = makeChaosParams(generatedLetters.filter(l => !l.isSpace).length);
+
+    // If an animation is selected, play it straight away from the beginning
+    animationState.time = 0;
+    animationState.playing = animationState.type !== 'none';
+    updateAnimationButtons();
+    updateExportButtons();
 }
 
-// Generate 6 different shuffle versions
-function generateShuffleVersions() {
-    shuffleVersions = [];
-    const fontsToUse = window.availableFonts || ['Arial', 'Times', 'Helvetica'];
-    
-    for (let v = 0; v < 6; v++) {
-        const version = [];
-        
-        for (let i = 0; i < currentText.length; i++) {
-            const char = currentText[i];
-            
-            if (char === ' ' || char.trim() === '') {
-                version.push({
-                    char: char,
-                    isSpace: true
-                });
-                continue;
-            }
-            
-            const randomFont = fontsToUse[Math.floor(Math.random() * fontsToUse.length)];
-            
-            const letterData = {
-                char: char,
-                isSpace: false,
-                font: randomFont,
-                baseSize: 30 + Math.random() * 20,
-                baseSizeMultiplier: 0.7 + Math.random() * 0.6,
-                baseDistortionX: (Math.random() - 0.5) * 2,
-                baseDistortionY: (Math.random() - 0.5) * 2,
-            };
-            
-            version.push(letterData);
-        }
-        
-        shuffleVersions.push(version);
-    }
-    
-    currentShuffleIndex = 0;
-    shuffleTimer = 0;
+// ------------------------------------------------------------
+// Drawing (shared by the live canvas and the PNG/GIF exports)
+// ------------------------------------------------------------
+function typewriterVisibleCount(t, total) {
+    const typeDuration = total / TYPE_RATE;
+    const cycle = typeDuration + TYPE_HOLD * animationState.speed;
+    const tc = t % cycle;
+    if (tc >= typeDuration) return total;
+    return Math.min(total, Math.floor(tc * TYPE_RATE) + 1);
 }
 
-// Draw the ransom note with improved blur support
-function drawRansomNote() {
-    let lettersToRender = generatedLetters;
-    
-    // Handle shuffle animation
-    if (animationState.type === 'shuffle' && shuffleVersions.length > 0) {
-        lettersToRender = shuffleVersions[currentShuffleIndex];
+// g is any p5 drawing surface: the main sketch or an offscreen graphics buffer
+function drawScene(g, opts) {
+    const { time, animate, type, transparent } = opts;
+
+    if (transparent) g.clear(); else g.background(255);
+
+    let letters = generatedLetters;
+    if (animate && type === 'shuffle' && shuffleVersions.length) {
+        letters = shuffleVersions[Math.floor(time / SHUFFLE_STEP) % shuffleVersions.length];
     }
-    
-    let visibleLetters = lettersToRender;
-    
-    // Handle typewriter animation
-    if (animationState.type === 'typewriter' && animationState.playing && !animationState.paused) {
-        const visibleCount = Math.floor(typewriterProgress);
-        visibleLetters = lettersToRender.slice(0, visibleCount);
+
+    let visibleCount = letters.length;
+    if (animate && type === 'typewriter') {
+        visibleCount = typewriterVisibleCount(time, letters.length);
     }
-    
-    if (visibleLetters.length === 0) return;
-    
-    // Calculate total width for centering and stretching
-    let totalBaseWidth = 0;
-    visibleLetters.forEach(letterData => {
-        if (letterData.isSpace) {
-            totalBaseWidth += 20; // Base space width
-        } else {
-            totalBaseWidth += letterData.baseSize;
+
+    const stretchX = effects.stretch / 100;
+    g.textAlign(CENTER, CENTER);
+
+    // Measure each letter's real width so letters don't overlap
+    const items = letters.map(l => {
+        if (l.isSpace) {
+            return { l, size: effects.size, w: effects.size * 0.4 * stretchX };
         }
+        const size = effects.size * l.sizeFactor;
+        g.textFont(cssFont(l.font));
+        g.textSize(size);
+        return { l, size, w: g.textWidth(l.char) * stretchX };
     });
-    
-    // Add base spacing
-    const spacingTotal = (visibleLetters.length - 1) * Math.abs(effects.spacing);
-    let totalWidth = (totalBaseWidth * (effects.stretch / 100)) + spacingTotal;
-    
-    // Scale to fit canvas width with padding
-    const maxWidth = width - 100;
-    let scaleFactor = 1;
-    if (totalWidth > maxWidth) {
-        scaleFactor = maxWidth / totalWidth;
-    }
-    
-    let currentX = (width - totalWidth * scaleFactor) / 2;
-    const currentY = height / 2;
-    
+
+    const totalWidth = items.reduce((sum, it) => sum + it.w, 0) +
+        effects.spacing * Math.max(0, items.length - 1);
+    const tallest = items.reduce((m, it) => Math.max(m, it.size), 0);
+
+    // Shrink to fit if the note is wider or taller than the canvas
+    const fit = Math.min(
+        1,
+        (g.width - 80) / Math.max(totalWidth, 1),
+        (g.height * 0.7) / Math.max(tallest * 1.2, 1)
+    );
+
+    g.push();
+    g.translate(g.width / 2, g.height / 2);
+    g.scale(fit);
+
+    let x = -totalWidth / 2;
     let letterIndex = 0;
-    
-    // Draw each letter
-    visibleLetters.forEach(letterData => {
-        if (letterData.isSpace) {
-            currentX += 20 * scaleFactor;
-            return;
+    items.forEach((it, idx) => {
+        if (!it.l.isSpace) {
+            if (idx < visibleCount) {
+                drawLetter(g, it, x + it.w / 2, letterIndex, time, animate ? type : 'none');
+            }
+            letterIndex++;
         }
-        
-        push();
-        
-        translate(currentX + (letterData.baseSize * (effects.stretch / 100) * scaleFactor) / 2, currentY);
-        
-        // Apply animation offsets
-        if (animationState.playing && !animationState.paused) {
-            applyAnimationOffset(letterIndex);
-        }
-        
-        // Apply distortion
-        if (effects.distortion > 0) {
-            rotate(radians(letterData.baseDistortionX * effects.distortion));
-        }
-        
-        // Set font and size
-        textFont(letterData.font);
-        const finalSize = (letterData.baseSize + effects.sizeVariation * letterData.baseSizeMultiplier) * (effects.stretch / 100) * scaleFactor;
-        textSize(finalSize);
-        
-        // Apply blur if needed
-        if (effects.blur > 0) {
-            drawingContext.save();
-            drawingContext.filter = `blur(${effects.blur}px)`;
-        }
-        
-        // Set stroke and fill
-        if (effects.strokeWeight > 0) {
-            stroke(0);
-            strokeWeight(effects.strokeWeight);
-            fill(255);
-        } else {
-            fill(0);
-            noStroke();
-        }
-        
-        text(letterData.char, 0, 0);
-        
-        if (effects.blur > 0) {
-            drawingContext.restore();
-        }
-        
-        pop();
-        
-        currentX += (letterData.baseSize * (effects.stretch / 100) * scaleFactor) + (effects.spacing * scaleFactor);
-        letterIndex++;
+        x += it.w + effects.spacing;
     });
+
+    g.pop();
 }
 
-// Apply animation offsets based on animation type
-function applyAnimationOffset(letterIndex) {
-    switch (animationState.type) {
-        case 'bounce':
-            if (bounceOffsets[letterIndex]) {
-                translate(0, bounceOffsets[letterIndex]);
+// p5 doesn't quote font names, and names with numbers (e.g. "Exo 2") break without quotes
+function cssFont(name) {
+    return `"${name}"`;
+}
+
+function applyAnimation(g, i, t, type) {
+    const S = effects.size;
+    switch (type) {
+        case 'bounce': {
+            // A wave that starts at the first letter and travels left to right
+            const local = t - i * BOUNCE_DELAY;
+            if (local > 0) g.translate(0, -Math.abs(Math.sin(local * BOUNCE_RATE)) * S * 0.35);
+            break;
+        }
+        case 'chaos': {
+            const p = chaosParams[i];
+            if (!p) break;
+            const w = TWO_PI / CHAOS_LOOP;
+            const dx = p.ax * S * (0.7 * Math.sin(p.kx1 * w * t + p.px1) + 0.3 * Math.sin(p.kx2 * w * t + p.px2));
+            const dy = p.ay * S * (0.7 * Math.sin(p.ky1 * w * t + p.py1) + 0.3 * Math.sin(p.ky2 * w * t + p.py2));
+            g.translate(dx, dy);
+            g.rotate(p.rot * Math.PI / 180 * Math.sin(p.kr * w * t + p.pr));
+            g.scale(1 + p.scl * Math.sin(p.ks * w * t + p.ps));
+            break;
+        }
+        case 'float': {
+            // Bobbing on water: each letter rides a small circular swell and rocks
+            // gently, starting at the first letter and rippling left to right
+            const local = t - i * FLOAT_DELAY;
+            if (local > 0) {
+                const a = local * FLOAT_RATE;
+                const ease = Math.min(1, local / 600);       // drift in softly from rest
+                g.translate(Math.cos(a) * S * 0.05 * ease, -Math.sin(a) * S * 0.12 * ease); // circular swell
+                g.rotate(Math.sin(a + 0.9) * 0.1 * ease);                                   // gentle rock (~6°)
             }
             break;
-        case 'chaos':
-            if (chaosOffsets[letterIndex]) {
-                translate(chaosOffsets[letterIndex].x, chaosOffsets[letterIndex].y);
-            }
+        }
+        case 'pulse': {
+            // Starts at the first letter and ripples left to right
+            const local = t - i * PULSE_DELAY;
+            if (local > 0) g.scale(1 + Math.sin(local * 0.01) * 0.2);
             break;
-        case 'float':
-            if (floatOffsets[letterIndex]) {
-                translate(0, floatOffsets[letterIndex]);
-            }
-            break;
-        case 'pulse':
-            if (pulseOffsets[letterIndex]) {
-                scale(pulseOffsets[letterIndex]);
-            }
-            break;
+        }
     }
 }
 
-// Initialize animation arrays
-function initializeAnimationArrays() {
-    const letterCount = generatedLetters.filter(l => !l.isSpace).length;
-    
-    bounceOffsets = new Array(letterCount).fill(0);
-    chaosOffsets = new Array(letterCount).fill({ x: 0, y: 0 });
-    floatOffsets = new Array(letterCount).fill(0);
-    pulseOffsets = new Array(letterCount).fill(1);
-}
+function drawLetter(g, it, x, letterIndex, t, type) {
+    const { l, size } = it;
 
-// Update animations
-function updateAnimations() {
-    if (!animationState.playing || animationState.paused) return;
-    
-    const currentTime = millis();
-    const elapsedTime = (currentTime - animationState.startTime - animationState.totalPausedTime) * animationState.speed;
-    
-    switch (animationState.type) {
-        case 'bounce':
-            updateBounceAnimation(elapsedTime);
-            break;
-        case 'chaos':
-            updateChaosAnimation(elapsedTime);
-            break;
-        case 'float':
-            updateFloatAnimation(elapsedTime);
-            break;
-        case 'pulse':
-            updatePulseAnimation(elapsedTime);
-            break;
-        case 'typewriter':
-            updateTypewriterAnimation(elapsedTime);
-            break;
-        case 'shuffle':
-            updateShuffleAnimation(elapsedTime);
-            break;
-    }
-}
+    g.push();
+    g.translate(x, 0);
+    applyAnimation(g, letterIndex, t, type);
 
-// Animation update functions
-function updateBounceAnimation(elapsedTime) {
-    for (let i = 0; i < bounceOffsets.length; i++) {
-        bounceOffsets[i] = sin((elapsedTime * 0.01) + (i * 0.5)) * 20;
-    }
-}
+    if (effects.tilt > 0) g.rotate(l.tiltDir * effects.tilt * Math.PI / 180);
+    g.scale(effects.stretch / 100, 1); // Stretch changes width only
 
-function updateChaosAnimation(elapsedTime) {
-    for (let i = 0; i < chaosOffsets.length; i++) {
-        chaosOffsets[i] = {
-            x: sin((elapsedTime * 0.008) + (i * 0.3)) * 15,
-            y: cos((elapsedTime * 0.01) + (i * 0.7)) * 15
-        };
-    }
-}
+    g.textFont(cssFont(l.font));
+    g.textSize(size);
 
-function updateFloatAnimation(elapsedTime) {
-    for (let i = 0; i < floatOffsets.length; i++) {
-        floatOffsets[i] = sin((elapsedTime * 0.005) + (i * 0.8)) * 10;
-    }
-}
+    const outlined = effects.strokeWeight > 0;
 
-function updatePulseAnimation(elapsedTime) {
-    for (let i = 0; i < pulseOffsets.length; i++) {
-        pulseOffsets[i] = 1 + sin((elapsedTime * 0.01) + (i * 0.4)) * 0.2;
-    }
-}
-
-function updateTypewriterAnimation(elapsedTime) {
-    const speed = 50; // characters per second
-    typewriterProgress = min((elapsedTime / 1000) * speed, generatedLetters.length);
-    
-    if (typewriterProgress >= generatedLetters.length) {
-        stopAnimation();
-    }
-}
-
-function updateShuffleAnimation(elapsedTime) {
-    shuffleTimer += deltaTime;
-    
-    if (shuffleTimer > 200) { // Change every 200ms
-        currentShuffleIndex = (currentShuffleIndex + 1) % shuffleVersions.length;
-        shuffleTimer = 0;
-    }
-}
-
-// Animation controls
-function playAnimation() {
-    if (generatedLetters.length === 0) return;
-    
-    if (animationState.paused) {
-        // Resume from pause
-        animationState.totalPausedTime += millis() - animationState.pauseTime;
-        animationState.paused = false;
+    if (effects.blur > 0) {
+        drawBlurredText(g, l.char, outlined);
     } else {
-        // Start new animation
-        animationState.startTime = millis();
-        animationState.totalPausedTime = 0;
-        
-        // Reset animation-specific variables
-        if (animationState.type === 'typewriter') {
-            typewriterProgress = 0;
+        if (outlined) {
+            g.fill(255);
+            g.stroke(0);
+            g.strokeWeight(effects.strokeWeight);
+        } else {
+            g.fill(0);
+            g.noStroke();
         }
-        if (animationState.type === 'shuffle') {
-            currentShuffleIndex = 0;
-            shuffleTimer = 0;
-        }
+        g.text(l.char, 0, 0);
     }
-    
+
+    g.pop();
+}
+
+// Blur that works in every browser, including Safari.
+// The letter is drawn far off-canvas and only its blurred shadow is moved back into place.
+function drawBlurredText(g, ch, outlined) {
+    const ctx = g.drawingContext;
+    const m = ctx.getTransform();
+    const scaleLen = Math.hypot(m.a, m.b) || 1;
+    const away = (ctx.canvas.width + ctx.canvas.height + 1000) / scaleLen;
+
+    ctx.shadowOffsetX = -m.a * away;
+    ctx.shadowOffsetY = -m.b * away;
+    ctx.shadowBlur = effects.blur * 2 * g.pixelDensity();
+
+    if (outlined) {
+        ctx.shadowColor = '#ffffff';
+        g.noStroke();
+        g.fill(255);
+        g.text(ch, away, 0);
+
+        ctx.shadowColor = '#000000';
+        g.noFill();
+        g.stroke(0);
+        g.strokeWeight(effects.strokeWeight);
+        g.text(ch, away, 0);
+    } else {
+        ctx.shadowColor = '#000000';
+        g.noStroke();
+        g.fill(0);
+        g.text(ch, away, 0);
+    }
+    // push()/pop() around each letter restores the shadow settings
+}
+
+// ------------------------------------------------------------
+// Animation controls (Play / Stop)
+// ------------------------------------------------------------
+function playAnimation() {
+    if (generatedLetters.length === 0 || animationState.type === 'none') return;
+    animationState.time = 0;
     animationState.playing = true;
     updateAnimationButtons();
 }
 
-function pauseAnimation() {
-    if (animationState.playing && !animationState.paused) {
-        animationState.paused = true;
-        animationState.pauseTime = millis();
-        updateAnimationButtons();
-    }
-}
-
 function stopAnimation() {
     animationState.playing = false;
-    animationState.paused = false;
-    animationState.startTime = 0;
-    animationState.totalPausedTime = 0;
-    
-    // Reset animation variables
-    typewriterProgress = 0;
-    currentShuffleIndex = 0;
-    shuffleTimer = 0;
-    initializeAnimationArrays();
-    
+    animationState.time = 0;
     updateAnimationButtons();
 }
 
 function changeAnimationType(newType) {
-    const wasPlaying = animationState.playing && !animationState.paused;
-    stopAnimation();
     animationState.type = newType;
-    
-    if (wasPlaying && newType !== 'none') {
-        playAnimation();
-    }
+    animationState.time = 0;
+    // Picking an animation starts it right away (once there's a note to animate)
+    animationState.playing = newType !== 'none' && generatedLetters.length > 0;
+    updateAnimationButtons();
 }
 
 function updateAnimationButtons() {
     const playBtn = document.getElementById('playBtn');
-    const pauseBtn = document.getElementById('pauseBtn');
     const stopBtn = document.getElementById('stopBtn');
-    
-    if (!playBtn || !pauseBtn || !stopBtn) return;
-    
-    // Update button states
-    playBtn.classList.toggle('active', animationState.playing && !animationState.paused);
-    pauseBtn.classList.toggle('active', animationState.paused);
-    
-    // Enable/disable buttons based on state
-    playBtn.disabled = animationState.playing && !animationState.paused;
-    pauseBtn.disabled = !animationState.playing;
-    stopBtn.disabled = !animationState.playing && !animationState.paused;
+    if (!playBtn || !stopBtn) return;
+
+    const canPlay = generatedLetters.length > 0 && animationState.type !== 'none';
+    playBtn.classList.toggle('active', animationState.playing);
+    playBtn.disabled = !canPlay || animationState.playing;
+    stopBtn.disabled = !animationState.playing;
 }
 
-function resetAnimation() {
-    stopAnimation();
-    initializeAnimationArrays();
+// ------------------------------------------------------------
+// Export: PNG and GIF
+// ------------------------------------------------------------
+function updateExportButtons() {
+    const hasNote = generatedLetters.length > 0;
+    document.getElementById('exportPngBtn').disabled = !hasNote;
+    document.getElementById('exportGifBtn').disabled = !hasNote;
 }
 
-// Setup collapsible sections
+function setExportStatus(msg) {
+    document.getElementById('exportStatus').textContent = msg;
+}
+
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function fileName(ext) {
+    const slug = currentText.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
+    return `random-letters${slug ? '-' + slug : ''}.${ext}`;
+}
+
+// Find the area that actually has letters in it, so exports are cropped neatly
+function contentBounds(imageData, bounds) {
+    const { data, width: w, height: h } = imageData;
+    let { minX, minY, maxX, maxY } = bounds;
+    for (let y = 0; y < h; y++) {
+        const row = y * w * 4;
+        for (let x = 0; x < w; x++) {
+            if (data[row + x * 4 + 3] > 8) {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+    return { minX, minY, maxX, maxY };
+}
+
+function emptyBounds() {
+    return { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+}
+
+function padBounds(b, pad, w, h) {
+    if (!isFinite(b.minX)) return { x: 0, y: 0, w, h };
+    const x = Math.max(0, b.minX - pad);
+    const y = Math.max(0, b.minY - pad);
+    return {
+        x, y,
+        w: Math.min(w, b.maxX + pad + 1) - x,
+        h: Math.min(h, b.maxY + pad + 1) - y
+    };
+}
+
+function exportPNG() {
+    if (!generatedLetters.length) return;
+    const density = 3; // high resolution
+    const g = createGraphics(width, height);
+    g.pixelDensity(density);
+
+    // Draw on a transparent buffer first to find where the letters are
+    drawScene(g, {
+        time: animationState.time,
+        animate: animationState.playing,
+        type: animationState.type,
+        transparent: true
+    });
+    const src = g.elt;
+    const ctx = src.getContext('2d');
+    const bounds = contentBounds(ctx.getImageData(0, 0, src.width, src.height), emptyBounds());
+    const crop = padBounds(bounds, 40 * density, src.width, src.height);
+
+    const out = document.createElement('canvas');
+    out.width = crop.w;
+    out.height = crop.h;
+    const octx = out.getContext('2d');
+    if (!transparentBackground) {
+        octx.fillStyle = '#ffffff';
+        octx.fillRect(0, 0, out.width, out.height);
+    }
+    octx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+    g.remove();
+
+    out.toBlob(blob => {
+        downloadBlob(blob, fileName('png'));
+        setExportStatus(`PNG saved (${out.width} × ${out.height}px)`);
+    }, 'image/png');
+}
+
+// Work out how many frames to record so the GIF loops smoothly
+function gifTimeline(type) {
+    const speed = animationState.speed;
+    const frameMs = 50; // 20 frames per second
+    const letterCount = generatedLetters.filter(l => !l.isSpace).length;
+    let start = 0;
+    let span; // animation time covered by the GIF
+
+    switch (type) {
+        case 'bounce':
+            start = (letterCount - 1) * BOUNCE_DELAY + 1;  // every letter already hopping
+            span = 2 * Math.PI / BOUNCE_RATE;               // two hops
+            break;
+        case 'chaos':
+            span = CHAOS_LOOP;
+            break;
+        case 'float':
+            start = (letterCount - 1) * FLOAT_DELAY + 600;  // every letter already bobbing
+            span = 2 * Math.PI / FLOAT_RATE;
+            break;
+        case 'pulse':
+            start = (letterCount - 1) * PULSE_DELAY + 1;
+            span = 2 * (2 * Math.PI / 0.01);
+            break;
+        case 'typewriter':
+            span = generatedLetters.length / TYPE_RATE + TYPE_HOLD * speed;
+            break;
+        case 'shuffle':
+            span = SHUFFLE_STEP * shuffleVersions.length;
+            break;
+        default:
+            return { start: 0, step: 0, frames: 1, delayCs: 100 };
+    }
+
+    let frames = Math.round(span / speed / frameMs);
+    frames = Math.max(2, Math.min(frames, 200));
+    const step = span / frames;
+    const delayCs = Math.max(2, Math.round((span / speed / frames) / 10));
+    return { start, step, frames, delayCs };
+}
+
+const nextTick = () => new Promise(r => setTimeout(r, 0));
+
+async function exportGIF() {
+    if (!generatedLetters.length) return;
+    const btn = document.getElementById('exportGifBtn');
+    btn.disabled = true;
+
+    try {
+        const type = animationState.type;
+        const timeline = gifTimeline(type);
+        const g = createGraphics(width, height);
+        g.pixelDensity(1);
+        const src = g.elt;
+        const ctx = src.getContext('2d', { willReadFrequently: true });
+        const render = f => drawScene(g, {
+            time: timeline.start + f * timeline.step,
+            animate: type !== 'none',
+            type,
+            transparent: true
+        });
+
+        // Pass 1: find the area the letters move through
+        let bounds = emptyBounds();
+        for (let f = 0; f < timeline.frames; f++) {
+            render(f);
+            bounds = contentBounds(ctx.getImageData(0, 0, src.width, src.height), bounds);
+            if (f % 5 === 0) {
+                setExportStatus(`Preparing GIF… ${Math.round(f / timeline.frames * 50)}%`);
+                await nextTick();
+            }
+        }
+        const crop = padBounds(bounds, 30, src.width, src.height);
+
+        // Pass 2: capture each frame
+        const frames = [];
+        for (let f = 0; f < timeline.frames; f++) {
+            render(f);
+            const img = ctx.getImageData(crop.x, crop.y, crop.w, crop.h);
+            frames.push(toGrayIndices(img.data, transparentBackground));
+            if (f % 5 === 0) {
+                setExportStatus(`Creating GIF… ${50 + Math.round(f / timeline.frames * 50)}%`);
+                await nextTick();
+            }
+        }
+        g.remove();
+
+        const bytes = encodeGIF(frames, crop.w, crop.h, timeline.delayCs, transparentBackground);
+        downloadBlob(new Blob([bytes], { type: 'image/gif' }), fileName('gif'));
+        setExportStatus(type === 'none'
+            ? 'GIF saved (still image — pick an animation to make it move)'
+            : `GIF saved (${timeline.frames} frames)`);
+    } catch (err) {
+        console.error(err);
+        setExportStatus('GIF could not be created. Try a shorter message or a smaller Size.');
+    } finally {
+        btn.disabled = generatedLetters.length === 0;
+    }
+}
+
+// ------------------------------------------------------------
+// Controls setup
+// ------------------------------------------------------------
 function setupCollapsible() {
-    const headers = document.querySelectorAll('.section-header');
-    
-    headers.forEach(header => {
-        header.addEventListener('click', function() {
-            const content = this.nextElementSibling;
-            const chevron = this.querySelector('.chevron');
-            
-            // Toggle expanded class
-            content.classList.toggle('expanded');
-            header.classList.toggle('expanded');
-            
-            // Rotate chevron
-            if (content.classList.contains('expanded')) {
-                chevron.style.transform = 'rotate(180deg)';
-            } else {
-                chevron.style.transform = 'rotate(0deg)';
+    document.querySelectorAll('.section-header').forEach(header => {
+        header.setAttribute('role', 'button');
+        header.setAttribute('tabindex', '0');
+        header.setAttribute('aria-expanded', 'false');
+
+        const toggle = () => {
+            const content = header.nextElementSibling;
+            const chevron = header.querySelector('.chevron');
+            const open = content.classList.toggle('expanded');
+            header.classList.toggle('expanded', open);
+            header.setAttribute('aria-expanded', String(open));
+            chevron.style.transform = open ? 'rotate(180deg)' : 'rotate(0deg)';
+        };
+
+        header.addEventListener('click', toggle);
+        header.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggle();
             }
         });
     });
 }
 
-// Setup sliders
 function setupSliders() {
     const sliders = [
         { id: 'blur', property: 'blur', suffix: 'px' },
         { id: 'spacing', property: 'spacing', suffix: 'px' },
         { id: 'stretch', property: 'stretch', suffix: '%' },
-        { id: 'sizeVariation', property: 'sizeVariation', suffix: 'px' },
+        { id: 'size', property: 'size', suffix: 'px' },
         { id: 'strokeWeight', property: 'strokeWeight', suffix: 'px' },
-        { id: 'distortion', property: 'distortion', suffix: '°' }
+        { id: 'tilt', property: 'tilt', suffix: '°' }
     ];
-    
+
     sliders.forEach(({ id, property, suffix }) => {
         const slider = document.getElementById(id);
+        if (!slider) return;
         const valueSpan = slider.parentElement.querySelector('.range-value');
-        
-        if (!slider || !valueSpan) return;
-        
-        // Set initial value
-        valueSpan.textContent = slider.value + suffix;
-        
-        slider.addEventListener('input', function() {
+
+        effects[property] = parseFloat(slider.value);
+        if (valueSpan) valueSpan.textContent = slider.value + suffix;
+
+        slider.addEventListener('input', function () {
             effects[property] = parseFloat(this.value);
-            valueSpan.textContent = this.value + suffix;
+            if (valueSpan) valueSpan.textContent = this.value + suffix;
         });
     });
-    
-    // Animation speed slider
+
     const speedSlider = document.getElementById('animationSpeed');
     if (speedSlider) {
         const speedValue = speedSlider.parentElement.querySelector('.range-value');
-        
-        speedSlider.addEventListener('input', function() {
+        speedSlider.addEventListener('input', function () {
             animationState.speed = parseFloat(this.value);
-            if (speedValue) {
-                speedValue.textContent = this.value + 'x';
-            }
+            if (speedValue) speedValue.textContent = this.value + 'x';
         });
     }
 }
 
-// Initialize the application
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM loaded, initializing ransom note generator...');
-    
-    // Get DOM elements
+// Single line only: turn line breaks into spaces and enforce the limit
+function sanitizeText(value) {
+    return Array.from(value.replace(/[\r\n]+/g, ' ')).slice(0, MAX_CHARS).join('');
+}
+
+function updateCharCounter(textInput) {
+    const count = Array.from(textInput.value).length;
+    const counter = document.getElementById('charCounter');
+    document.getElementById('charCount').textContent = count;
+    counter.classList.toggle('near', count >= MAX_CHARS - 5 && count < MAX_CHARS);
+    counter.classList.toggle('full', count >= MAX_CHARS);
+}
+
+function showLoading(show) {
+    const el = document.getElementById('loadingIndicator');
+    if (el) el.style.display = show ? 'flex' : 'none';
+}
+
+document.addEventListener('fontsready', () => {
+    showLoading(false);
+    if (pendingGenerate) {
+        pendingGenerate = false;
+        generateLetters();
+    }
+});
+
+document.addEventListener('DOMContentLoaded', function () {
     const textInput = document.getElementById('textInput');
     const generateBtn = document.getElementById('generateBtn');
-    
     if (!textInput || !generateBtn) {
-        console.error('Required DOM elements not found');
+        console.error('Required page elements not found');
         return;
     }
-    
-    // Setup collapsible sections (start closed)
+
     setupCollapsible();
-    
-    // Setup sliders
     setupSliders();
-    
-    // Generate button click
-    generateBtn.addEventListener('click', function() {
-        currentText = textInput.value;
-        generateRansomNote();
+
+    textInput.addEventListener('input', () => {
+        const clean = sanitizeText(textInput.value);
+        if (clean !== textInput.value) textInput.value = clean;
+        updateCharCounter(textInput);
     });
-    
-    // Enter key to generate
-    textInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
+    updateCharCounter(textInput);
+
+    generateBtn.addEventListener('click', generateLetters);
+    textInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
             e.preventDefault();
-            currentText = textInput.value;
-            generateRansomNote();
+            generateLetters();
         }
     });
-    
-    // Animation controls
-    const playBtn = document.getElementById('playBtn');
-    const pauseBtn = document.getElementById('pauseBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const animationType = document.getElementById('animationType');
-    
-    if (playBtn) playBtn.addEventListener('click', playAnimation);
-    if (pauseBtn) pauseBtn.addEventListener('click', pauseAnimation);
-    if (stopBtn) stopBtn.addEventListener('click', stopAnimation);
-    if (animationType) {
-        animationType.addEventListener('change', function() {
-            changeAnimationType(this.value);
-        });
-    }
-    
-    // Initialize animation buttons
+
+    document.getElementById('playBtn').addEventListener('click', playAnimation);
+    document.getElementById('stopBtn').addEventListener('click', stopAnimation);
+    document.getElementById('animationType').addEventListener('change', function () {
+        changeAnimationType(this.value);
+    });
+
+    const transparentBox = document.getElementById('transparentBg');
+    transparentBox.addEventListener('change', function () {
+        transparentBackground = this.checked;
+        document.querySelector('.canvas-container').classList.toggle('transparent-preview', this.checked);
+    });
+
+    document.getElementById('exportPngBtn').addEventListener('click', exportPNG);
+    document.getElementById('exportGifBtn').addEventListener('click', exportGIF);
+
     updateAnimationButtons();
-    
-    console.log('Event listeners attached successfully');
+    updateExportButtons();
 });
+
+// ------------------------------------------------------------
+// Minimal GIF encoder (grayscale palette — the notes are black and white)
+// ------------------------------------------------------------
+const GIF_TRANSPARENT_INDEX = 255;
+
+// Convert RGBA pixels to palette indices
+function toGrayIndices(rgba, transparent) {
+    const n = rgba.length / 4;
+    const out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+        const r = rgba[i * 4], gr = rgba[i * 4 + 1], b = rgba[i * 4 + 2], a = rgba[i * 4 + 3];
+        const lum = 0.299 * r + 0.587 * gr + 0.114 * b;
+        if (transparent) {
+            // GIF transparency is on/off only, so soft edges are cut at half opacity
+            out[i] = a < 128 ? GIF_TRANSPARENT_INDEX : Math.round(lum * 254 / 255);
+        } else {
+            // Composite onto white
+            const v = lum * (a / 255) + 255 * (1 - a / 255);
+            out[i] = Math.round(v);
+        }
+    }
+    return out;
+}
+
+function gifPalette(transparent) {
+    const pal = new Uint8Array(256 * 3);
+    for (let i = 0; i < 256; i++) {
+        const v = transparent ? Math.min(255, Math.round(i * 255 / 254)) : i;
+        pal[i * 3] = pal[i * 3 + 1] = pal[i * 3 + 2] = v;
+    }
+    return pal;
+}
+
+function lzwEncode(indices, minCodeSize, out) {
+    const clearCode = 1 << minCodeSize;
+    const eoiCode = clearCode + 1;
+    let codeSize = minCodeSize + 1;
+    let nextCode = eoiCode + 1;
+    let dict = new Map();
+
+    const bytes = [];
+    let bitBuf = 0, bitCount = 0;
+    const emit = code => {
+        bitBuf |= code << bitCount;
+        bitCount += codeSize;
+        while (bitCount >= 8) {
+            bytes.push(bitBuf & 0xff);
+            bitBuf >>>= 8;
+            bitCount -= 8;
+        }
+    };
+
+    emit(clearCode);
+    let prefix = indices[0];
+    for (let i = 1; i < indices.length; i++) {
+        const k = indices[i];
+        const key = prefix * 256 + k;
+        const found = dict.get(key);
+        if (found !== undefined) {
+            prefix = found;
+            continue;
+        }
+        emit(prefix);
+        if (nextCode < 4096) {
+            dict.set(key, nextCode++);
+            if (nextCode > (1 << codeSize) && codeSize < 12) codeSize++;
+        } else {
+            emit(clearCode);
+            dict = new Map();
+            codeSize = minCodeSize + 1;
+            nextCode = eoiCode + 1;
+        }
+        prefix = k;
+    }
+    emit(prefix);
+    emit(eoiCode);
+    if (bitCount > 0) bytes.push(bitBuf & 0xff);
+
+    // Split into sub-blocks of up to 255 bytes
+    out.push(minCodeSize);
+    for (let i = 0; i < bytes.length; i += 255) {
+        const chunk = bytes.slice(i, i + 255);
+        out.push(chunk.length, ...chunk);
+    }
+    out.push(0);
+}
+
+function encodeGIF(frames, w, h, delayCs, transparent) {
+    const out = [];
+    const u16 = v => out.push(v & 0xff, (v >> 8) & 0xff);
+    const str = s => { for (const c of s) out.push(c.charCodeAt(0)); };
+
+    str('GIF89a');
+    u16(w); u16(h);
+    out.push(0xf7, 0, 0);                 // 256-colour global palette
+    out.push(...gifPalette(transparent));
+
+    if (frames.length > 1) {              // loop forever
+        out.push(0x21, 0xff, 0x0b);
+        str('NETSCAPE2.0');
+        out.push(0x03, 0x01, 0x00, 0x00, 0x00);
+    }
+
+    for (const frame of frames) {
+        // Graphic control: delay, and clear each frame when transparent
+        out.push(0x21, 0xf9, 0x04, transparent ? (2 << 2) | 1 : (1 << 2));
+        u16(delayCs);
+        out.push(transparent ? GIF_TRANSPARENT_INDEX : 0, 0);
+        // Image descriptor
+        out.push(0x2c);
+        u16(0); u16(0); u16(w); u16(h);
+        out.push(0);
+        lzwEncode(frame, 8, out);
+    }
+    out.push(0x3b);
+    return new Uint8Array(out);
+}
