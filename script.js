@@ -14,7 +14,7 @@ let pendingGenerate = false; // Generate was clicked before fonts finished loadi
 // Effect settings - controlled by the sliders
 let effects = {
     blur: 0,
-    spacing: 6,
+    spacing: 0,
     stretch: 100,
     size: 64,
     strokeWeight: 0,
@@ -103,24 +103,34 @@ function draw() {
 // ------------------------------------------------------------
 // Generating the note
 // ------------------------------------------------------------
-// Pick a random font, avoiding any in `exclude` when possible
-function randomFont(exclude = []) {
+// Pick a random font. Prefers fonts used the fewest times so far in this message,
+// so every letter gets a different font (there are far more fonts than letters).
+// If only the small backup font list loaded, fonts are spread as evenly as possible.
+function pickFont(usage, exclude = []) {
     const fonts = window.availableFonts.length ? window.availableFonts : ['Arial'];
-    const choices = fonts.filter(f => !exclude.includes(f));
-    const pool = choices.length ? choices : fonts;
-    return pool[Math.floor(Math.random() * pool.length)];
+    const allowed = fonts.filter(f => !exclude.includes(f));
+    const pool = allowed.length ? allowed : fonts;
+    const fewest = Math.min(...pool.map(f => usage.get(f) || 0));
+    const least = pool.filter(f => (usage.get(f) || 0) === fewest);
+    return least[Math.floor(Math.random() * least.length)];
 }
 
 // `avoid` is a list of other versions of the same message: each letter gets a font
-// different from the one at the same position in those versions
+// different from the one at the same position in those versions (used by Shuffle)
 function makeLetters(text, avoid = []) {
+    const usage = new Map();  // how many times each font is used in this message
+    let previousFont = null;  // the letter before (spaces skipped), never matched
     return Array.from(text).map((char, i) => {
         if (char.trim() === '') return { char: ' ', isSpace: true };
         const exclude = avoid.map(version => version[i] && version[i].font).filter(Boolean);
+        if (previousFont) exclude.push(previousFont);
+        const font = pickFont(usage, exclude);
+        usage.set(font, (usage.get(font) || 0) + 1);
+        previousFont = font;
         return {
             char,
             isSpace: false,
-            font: randomFont(exclude),
+            font,
             sizeFactor: 0.75 + Math.random() * 0.55, // each letter's own size, relative to the Size slider
             tiltDir: Math.random() * 2 - 1           // each letter's own tilt direction/amount
         };
@@ -334,14 +344,23 @@ function drawLetter(g, it, x, letterIndex, t, type) {
         drawBlurredText(g, l.char, outlined);
     } else {
         if (outlined) {
-            g.fill(paperColor());
+            // Outline drawn first, behind the letter: only its outer edge shows,
+            // so lines from overlapping shapes inside the letter are hidden.
+            // Doubled because the letter covers the inner half.
+            g.noFill();
             g.stroke(inkColor());
-            g.strokeWeight(effects.strokeWeight);
+            g.strokeWeight(effects.strokeWeight * 2);
+            g.strokeJoin(ROUND); // rounded corners: no spikes on sharp points
+            g.text(l.char, 0, 0);
+
+            g.noStroke();
+            g.fill(paperColor());
+            g.text(l.char, 0, 0);
         } else {
             g.fill(inkColor());
             g.noStroke();
+            g.text(l.char, 0, 0);
         }
-        g.text(l.char, 0, 0);
     }
 
     g.pop();
@@ -363,15 +382,17 @@ function drawBlurredText(g, ch, outlined) {
     const hex = v => v ? '#ffffff' : '#000000';
 
     if (outlined) {
-        ctx.shadowColor = hex(paper);
-        g.noStroke();
-        g.fill(paper);
-        g.text(ch, away, 0);
-
+        // Outline first (behind the letter), then the letter on top
         ctx.shadowColor = hex(ink);
         g.noFill();
         g.stroke(ink);
-        g.strokeWeight(effects.strokeWeight);
+        g.strokeWeight(effects.strokeWeight * 2);
+        g.strokeJoin(ROUND); // rounded corners: no spikes on sharp points
+        g.text(ch, away, 0);
+
+        ctx.shadowColor = hex(paper);
+        g.noStroke();
+        g.fill(paper);
         g.text(ch, away, 0);
     } else {
         ctx.shadowColor = hex(ink);
