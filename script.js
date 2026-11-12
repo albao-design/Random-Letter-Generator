@@ -48,6 +48,53 @@ const FLOAT_DELAY = 120;        // float: ms between each letter starting, left 
 const FLOAT_RATE = 0.004;       // float: one gentle bob about every 1.6s at 1x
 const PULSE_DELAY = 80;         // pulse: ms between each letter starting, left to right
 
+// Expand: the whole word shrinks, grows back to full size, then holds (times at 1x)
+const EXPAND_SHRINK = 600;
+const EXPAND_GROW = 900;
+const EXPAND_HOLD = 700;
+const EXPAND_MIN = 0.2;         // smallest size, as a share of full size
+
+// Rubberband: letters gather into the centre letter, stretch out wide,
+// spring back to normal (wobbling a little before settling), then hold (times at 1x)
+const RUBBER_GATHER = 500;
+const RUBBER_OUT = 700;
+const RUBBER_BACK = 900;
+const RUBBER_HOLD = 400;
+const RUBBER_PEAK = 1.6;        // widest point, as a multiple of the normal width
+
+// Smooth start and finish, no overshoot
+const easeInOut = x => 0.5 - 0.5 * Math.cos(Math.PI * x);
+
+function expandScale(t) {
+    const p = t % (EXPAND_SHRINK + EXPAND_GROW + EXPAND_HOLD);
+    if (p < EXPAND_SHRINK) return 1 - (1 - EXPAND_MIN) * easeInOut(p / EXPAND_SHRINK);
+    if (p < EXPAND_SHRINK + EXPAND_GROW) {
+        return EXPAND_MIN + (1 - EXPAND_MIN) * easeInOut((p - EXPAND_SHRINK) / EXPAND_GROW);
+    }
+    return 1;
+}
+
+// pos: how spread out the letters are (0 = all at the centre, 1 = normal)
+// width: how stretched each letter is (1 = normal)
+function rubberState(t) {
+    const p = t % (RUBBER_GATHER + RUBBER_OUT + RUBBER_BACK + RUBBER_HOLD);
+    if (p < RUBBER_GATHER) {
+        return { pos: 1 - easeInOut(p / RUBBER_GATHER), width: 1 };
+    }
+    if (p < RUBBER_GATHER + RUBBER_OUT) {
+        const k = easeInOut((p - RUBBER_GATHER) / RUBBER_OUT);
+        return { pos: RUBBER_PEAK * k, width: 1 + (RUBBER_PEAK - 1) * k };
+    }
+    if (p < RUBBER_GATHER + RUBBER_OUT + RUBBER_BACK) {
+        // Springy snap back: overshoots past normal, wobbles, and settles exactly at normal
+        const k = (p - RUBBER_GATHER - RUBBER_OUT) / RUBBER_BACK;
+        const spring = Math.cos(3 * Math.PI * k) * Math.exp(-4.5 * k) * (1 - k ** 4);
+        const v = 1 + (RUBBER_PEAK - 1) * spring;
+        return { pos: v, width: v };
+    }
+    return { pos: 1, width: 1 };
+}
+
 // ------------------------------------------------------------
 // p5.js setup / draw
 // ------------------------------------------------------------
@@ -218,7 +265,11 @@ function drawScene(g, opts) {
         visibleCount = typewriterVisibleCount(time, letters.length);
     }
 
-    const stretchX = effects.stretch / 100;
+    // Rubberband moves the letters toward/away from the centre and stretches them
+    const isRubber = animate && type === 'rubberband';
+    const rubber = isRubber ? rubberState(time) : { pos: 1, width: 1 };
+    const stretchX = effects.stretch / 100;   // layout uses the word at rest
+    letterStretch = stretchX * rubber.width;
     g.textAlign(CENTER, CENTER);
 
     // Measure each letter's real width so letters don't overlap
@@ -232,14 +283,21 @@ function drawScene(g, opts) {
         return { l, size, w: g.textWidth(l.char) * stretchX };
     });
 
-    const totalWidth = items.reduce((sum, it) => sum + it.w, 0) +
-        effects.spacing * Math.max(0, items.length - 1);
+    const lettersWidth = items.reduce((sum, it) => sum + it.w, 0);
+    const spacingWidth = effects.spacing * Math.max(0, items.length - 1);
+    const totalWidth = lettersWidth + spacingWidth;
     const tallest = items.reduce((m, it) => Math.max(m, it.size), 0);
+
+    // Sizing is based on the word at rest, so Rubberband doesn't make it pulse in size;
+    // the widest stretch is still kept inside the frame
+    const restWidth = totalWidth;
+    const peakWidth = isRubber ? totalWidth * RUBBER_PEAK : totalWidth;
 
     // On screen: shrink to fit if the note is wider or taller than the canvas
     const screenFit = (w, h) => Math.min(
         1,
-        (w - 80) / Math.max(totalWidth, 1),
+        (w - 80) / Math.max(restWidth, 1),
+        (w - 20) / Math.max(peakWidth, 1),
         (h * 0.7) / Math.max(tallest * 1.2, 1)
     );
 
@@ -247,7 +305,8 @@ function drawScene(g, opts) {
     if (opts.fill) {
         // Square video: scale the letters up or down to fill the frame, with a margin
         fit = Math.min(
-            (g.width * 0.84) / Math.max(totalWidth, 1),
+            (g.width * 0.84) / Math.max(restWidth, 1),
+            (g.width * 0.96) / Math.max(peakWidth, 1),
             (g.height * 0.6) / Math.max(tallest * 1.2, 1)
         );
         // Keep blur looking the same as on screen at the new scale
@@ -260,13 +319,15 @@ function drawScene(g, opts) {
     g.push();
     g.translate(g.width / 2, g.height / 2);
     g.scale(fit);
+    // Expand scales the whole word together, like moving the Size slider
+    if (animate && type === 'expand') g.scale(expandScale(time));
 
     let x = -totalWidth / 2;
     let letterIndex = 0;
     items.forEach((it, idx) => {
         if (!it.l.isSpace) {
             if (idx < visibleCount) {
-                drawLetter(g, it, x + it.w / 2, letterIndex, time, animate ? type : 'none');
+                drawLetter(g, it, (x + it.w / 2) * rubber.pos, letterIndex, time, animate ? type : 'none');
             }
             letterIndex++;
         }
@@ -278,6 +339,9 @@ function drawScene(g, opts) {
 
 // How much to scale blur by (1 on screen; larger when letters are scaled up for video)
 let blurScale = 1;
+
+// Current horizontal stretch for each letter (the Stretch slider, animated by Rubberband)
+let letterStretch = 1;
 
 // p5 doesn't quote font names, and names with numbers (e.g. "Exo 2") break without quotes
 function cssFont(name) {
@@ -333,7 +397,7 @@ function drawLetter(g, it, x, letterIndex, t, type) {
     applyAnimation(g, letterIndex, t, type);
 
     if (effects.tilt > 0) g.rotate(l.tiltDir * effects.tilt * Math.PI / 180);
-    g.scale(effects.stretch / 100, 1); // Stretch changes width only
+    g.scale(letterStretch, 1); // Stretch changes width only
 
     g.textFont(cssFont(l.font));
     g.textSize(size);
@@ -598,6 +662,12 @@ function videoTimeline(type) {
             break;
         case 'shuffle':
             span = SHUFFLE_STEP * shuffleVersions.length;
+            break;
+        case 'expand':
+            span = EXPAND_SHRINK + EXPAND_GROW + EXPAND_HOLD;
+            break;
+        case 'rubberband':
+            span = RUBBER_GATHER + RUBBER_OUT + RUBBER_BACK + RUBBER_HOLD;
             break;
         default:
             return null;
